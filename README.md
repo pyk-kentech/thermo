@@ -85,6 +85,10 @@ ASUS TUF Gaming F17 (FX707VU) 한 대 전용 온도 진단 도구.
 
 테스트는 `THERMO_HOME` 을 임시 폴더로 바꿔 실제 기록을 건드리지 않는다.
 
+## 라이선스
+
+MIT — [LICENSE](LICENSE). 단, `vendor\lhm` 의 DLL 은 각자의 라이선스를 따른다(아래).
+
 ## 제3자 구성 요소
 
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 참고. LibreHardwareMonitorLib(MPL-2.0) 등을 수정 없이 `vendor\lhm` 에 둔다.
