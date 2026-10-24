@@ -78,6 +78,7 @@ class LinearModel:
     n: int                           # 맞춘 묶음 수
     stages: list[str]                # 맞추는 데 쓴 단계
     notes: list[str] = field(default_factory=list)
+    ranges: dict[str, list[float]] = field(default_factory=dict)   # 입력별 잰 범위 [최소, 최대] W
 
     def predict(self, **x: float | None) -> float | None:
         total = self.intercept
@@ -127,8 +128,9 @@ def fit(target: str, inputs: list[str], data: list[Block]) -> LinearModel | None
         return None
     resid = [yy - sum(bi * xi for bi, xi in zip(beta, r)) for r, yy in zip(x, y)]
     sigma = math.sqrt(sum(e * e for e in resid) / max(1, len(rows) - k))
+    ranges = {k: [min(getattr(d, k) for d in rows), max(getattr(d, k) for d in rows)] for k in inputs}
     return LinearModel(target, beta[0], dict(zip(use, beta[1:])), max(sigma, SIGMA_FLOOR), len(rows),
-                       sorted({d.stage for d in rows}), notes)
+                       sorted({d.stage for d in rows}), notes, ranges)
 
 
 @dataclass
