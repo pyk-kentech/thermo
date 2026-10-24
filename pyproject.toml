@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thermo"
+version = "0.1.0"
+description = "ASUS TUF FX707VU 전용 온도 진단 도구"
+requires-python = ">=3.11"
+# 이유는 DESIGN.md 4장
+dependencies = [
+    "pythonnet>=3.0",     # LHM(.NET)·WMI·성능 카운터
+    "nvidia-ml-py>=12",   # GPU (NVML)
+    "psutil>=5.9",        # 프로세스별 CPU 사용량
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
