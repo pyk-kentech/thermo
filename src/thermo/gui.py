@@ -31,8 +31,18 @@ DIM = "#5f6670"
 COLORS = {Level.OK: "#34c759", Level.WARN: "#ff9f0a", Level.BAD: "#ff453a"}
 GREY = "#8e8e93"
 CPU_C, CPU_AVG_C, GPU_C, FAN_C = "#ff6b6b", "#ffb0b0", "#5ac8fa", "#34c759"
-KO = "Malgun Gothic"
-NUM = "Segoe UI"
+# 글꼴: Pretendard (2026-10-24 사용자 요청, OFL-1.1, 이 PC 에 설치돼 있음). 없으면 맑은 고딕·Segoe UI.
+KO = "Pretendard"
+NUM = "Pretendard"
+FALLBACK = ("Malgun Gothic", "Segoe UI")
+
+
+def pick_fonts(root: tk.Tk) -> None:
+    """Pretendard 가 없는 PC 에서는 기본 글꼴로 바꾼다."""
+    import tkinter.font as tkfont
+    global KO, NUM
+    if "Pretendard" not in tkfont.families(root):
+        KO, NUM = FALLBACK
 
 REFRESH_EVERY = 2          # 초마다 판단
 HISTORY_SECONDS = 600      # 기록 그래프: 최근 10분
@@ -199,6 +209,7 @@ class App:
         root.configure(bg=BG)
         root.protocol("WM_DELETE_WINDOW", self.close)
         dark_title_bar(root)
+        pick_fonts(root)
         self._style()
         self._build()
         self.show_measuring(0, 10, [])
