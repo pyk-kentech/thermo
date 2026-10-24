@@ -231,3 +231,18 @@ def test_same_name_processes_merged(root):
     lines = [[w.cget("text") for w in line.winfo_children()] for line in app.procs.winfo_children()]
     assert [l[0] for l in lines] == ["claude.exe", "System"]
     assert lines[0][-1].startswith("CPU 3%")
+
+
+def test_header_power_update_and_on_top(root):
+    app = gui.App(root, None)
+    s = make(cpu={"temp": 70, "power": 20, "peak_temp": 91, "temp_avg": 66}, power={"ac": False, "charging": False})
+    app.show_verdict(diagnose(s, reference(), Steady(True, "")))
+    assert app.power_short.cget("text") == "배터리 · 균형 조정"
+    assert app.updated.cget("text").endswith("갱신")
+    assert app.cards["CPU"].line2.cget("text") == "코어 평균 66°C · 10초 최고 91°C"
+    assert "GHz" not in app.cards["CPU"].line2.cget("text")
+    assert app.cards["GPU"].line2.cget("text").endswith("남음")
+    assert "어댑터" not in app.cards["FAN"].line2.cget("text") and "배터리" not in app.cards["FAN"].line2.cget("text")
+    app.on_top.set(True)
+    app.toggle_on_top()
+    assert bool(root.attributes("-topmost"))

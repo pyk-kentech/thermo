@@ -330,8 +330,7 @@ def diagnose(stats: WindowStats, ref: Reference | None, steady: Steady,
 
 
 def _finish(level, headline, stats, ref, judge, ev, notes, keys) -> Diagnosis:
-    if ref is not None:
-        notes = notes + [n for n in ref.notes if "범위" in n or "합쳐" in n][:2]
+    # 기준 측정 자체의 사정(합쳐 계산함 등)은 기준 측정 탭에서 보인다 — 판단 안내에는 넣지 않는다(UI 정리)
     return Diagnosis(level, f"{level.label} — {headline}", _situation(stats, ref), judge, ev,
                      list(dict.fromkeys(notes)), keys, stats)
 

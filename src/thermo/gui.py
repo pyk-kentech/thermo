@@ -253,8 +253,18 @@ class App:
         top.pack(fill="x")
         self.level = tk.Label(top, text="", font=(KO, 20, "bold"), fg=GREY, bg=CARD, anchor="w")
         self.level.pack(side="left")
-        self.ref_short = tk.Label(top, text="", font=(KO, 8), fg=DIM, bg=CARD, anchor="e")
-        self.ref_short.pack(side="right")
+        side = tk.Frame(top, bg=CARD)
+        side.pack(side="right", anchor="n")
+        self.ref_short = tk.Label(side, text="", font=(KO, 8), fg=DIM, bg=CARD, anchor="e")
+        self.ref_short.pack(anchor="e")
+        self.power_short = tk.Label(side, text="", font=(KO, 8), fg=DIM, bg=CARD, anchor="e")
+        self.power_short.pack(anchor="e")
+        self.updated = tk.Label(side, text="", font=(KO, 8), fg=DIM, bg=CARD, anchor="e")
+        self.updated.pack(anchor="e")
+        self.on_top = tk.BooleanVar(value=False)
+        tk.Checkbutton(side, text="항상 위", variable=self.on_top, command=self.toggle_on_top, font=(KO, 8),
+                       fg=SUB, bg=CARD, activebackground=CARD, activeforeground=TEXT, selectcolor=BG,
+                       bd=0, highlightthickness=0).pack(anchor="e")
         self.headline = tk.Label(inner, text="", font=(KO, 11), fg=TEXT, bg=CARD, anchor="w", justify="left")
         self.headline.pack(fill="x")
 
@@ -346,8 +356,10 @@ class App:
         badge, bc = "", ""
         if (c.thermal_frac or 0) >= 0.05:
             badge, bc = f"95°C 스로틀 {c.thermal_frac:.0%}", COLORS[Level.WARN]
+        # 클럭은 전체 코어 평균 추정치라 판단에 안 쓰고 뜻이 애매해 보이지 않는다(2026-10-24 UI 정리).
+        # 대신 1초 안의 순간 최고(10초 중) — 평균 74°C 라도 순간 95°C 를 찍는 일이 있었다(M1·M6).
         self.cards["CPU"].set(_n(c.temp, 0, "°C"), f"{_n(c.power, 0, 'W')} · 사용률 {_n(c.load, 0, '%')}",
-                              f"코어 평균 {_n(c.temp_avg, 0, '°C')} · {_n(None if c.clock is None else c.clock / 1000, 1, 'GHz')}",
+                              f"코어 평균 {_n(c.temp_avg, 0, '°C')} · 10초 최고 {_n(c.peak_temp, 0, '°C')}",
                               badge, bc)
         gl = {k: v for k, v in g.limit_frac.items() if v >= 0.05}
         gbadge, gbc = "", ""
@@ -356,10 +368,17 @@ class App:
         elif gl.get("power"):
             gbadge, gbc = f"전력 제한 {gl['power']:.0%}", "#5e5ce6"
         self.cards["GPU"].set(_n(g.temp, 0, "°C"), f"{_n(g.power, 0, 'W')} · 사용률 {_n(g.load, 0, '%')}",
-                              f"한계까지 {_n(g.margin, 0, '°C')}", gbadge, gbc)
-        src = {True: "어댑터", False: "배터리", None: "전원 ?"}[s.power.ac]
-        self.cards["FAN"].set(_n(f.cpu_rpm, 0), f"CPU 팬 rpm · GPU 팬 {_n(f.gpu_rpm, 0)}", src,
-                              "배터리" if s.power.ac is False else "", COLORS[Level.WARN])
+                              f"한계까지 {_n(g.margin, 0, '°C')} 남음", gbadge, gbc)
+        self.cards["FAN"].set(_n(f.cpu_rpm, 0), "CPU 팬 rpm", f"GPU 팬 {_n(f.gpu_rpm, 0, ' rpm')}")
+        p = s.power
+        src = {True: "어댑터", False: "배터리", None: "전원 ?"}[p.ac] + (" (충전 중)" if p.charging else "")
+        self.power_short.config(text=f"{src} · {p.scheme or '전원 계획 ?'}",
+                                fg=COLORS[Level.WARN] if p.ac is False else DIM)
+        self.updated.config(text=time.strftime("%H:%M:%S 갱신"))
+
+    def toggle_on_top(self) -> None:
+        """게임 중에도 창이 위에 보이게."""
+        self.root.attributes("-topmost", bool(self.on_top.get()))
 
     def _procs(self, s: WindowStats) -> None:
         for w in self.procs.winfo_children():
