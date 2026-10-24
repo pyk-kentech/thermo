@@ -26,25 +26,31 @@ class Monitor(threading.Thread):
     """
 
     def __init__(self, out: queue.Queue, make_collector: Callable, make_baseline: Callable,
-                 interval: float = 1.0) -> None:
+                 interval: float = 1.0, make_store: Callable | None = None) -> None:
         super().__init__(daemon=True, name="thermo-monitor")
         self.out = out
         self.make_collector = make_collector
         self.make_baseline = make_baseline
+        self.make_store = make_store
         self.interval = interval
         self.stop = threading.Event()
 
     def run(self) -> None:
-        col = base = None
+        col = base = store = None
         try:
             col = self.make_collector()
             base = self.make_baseline()
+            store = self.make_store() if self.make_store else None
+            if store is not None and getattr(col, "fast", None) is not None:
+                store.note("cpu_limits", vars(col.fast.limits))
             fan_max = base.fan_max()
             size = col.window.maxlen
             i = last_record = 0
             while not self.stop.is_set():
                 t0 = time.monotonic()
-                col.sample()
+                snap = col.sample()
+                if store is not None:
+                    store.add(snap)
                 i += 1
                 if len(col.window) < size:
                     self.out.put(("measuring", len(col.window), size, list(col.notes)))
@@ -59,7 +65,7 @@ class Monitor(threading.Thread):
         except Exception as e:  # 화면에 알리고 멈춘다
             self.out.put(("error", f"{type(e).__name__}: {e}"))
         finally:
-            for x in (base, col):
+            for x in (store, base, col):
                 if x is not None:
                     try:
                         x.close()
@@ -194,6 +200,7 @@ class App:
 def run() -> None:
     from .baseline import Baseline
     from .collect import Collector
+    from .store import Store
     root = tk.Tk()
-    App(root, Monitor(queue.Queue(), Collector, Baseline))
+    App(root, Monitor(queue.Queue(), Collector, Baseline, make_store=Store))
     root.mainloop()

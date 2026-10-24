@@ -40,6 +40,11 @@ class CpuReading:
     clock: float | None = None         # 가장 빠른 코어 MHz
     perf_limit: float | None = None    # % Performance Limit (100 = 제한 없음)
     source: str = ""                   # "lhm" | "asus" | ""
+    # MSR 10Hz 고리에서 (DESIGN 2판 5장). 1초(또는 창) 중 그 상태였던 비율 0–1
+    peak_temp: float | None = None     # 그 사이 가장 높았던 패키지 온도 (TjMax - 최소 거리)
+    thermal_frac: float | None = None  # 0x1B1 열 상태(95°C 도달) 비율
+    prochot_frac: float | None = None  # 0x1B1 PROCHOT 비율
+    limit_frac: dict[str, float] = field(default_factory=dict)   # 0x64F 이유별 비율
 
 
 @dataclass
@@ -53,6 +58,7 @@ class GpuReading:
     clock: float | None = None
     clock_max: float | None = None
     reasons: int = 0                   # clocks event reasons 비트
+    limit_frac: dict[str, float] = field(default_factory=dict)   # NVML 제한 이유별 누적 시간 비율 0–1
 
 
 @dataclass
@@ -126,6 +132,12 @@ def _min(items, get):
     return min(v) if v else None
 
 
+def _mean_dict(ds: list[dict[str, float]]) -> dict[str, float]:
+    """키별 평균. 값이 없는 표본은 그 키에서 빠진다."""
+    keys = dict.fromkeys(k for d in ds for k in d)
+    return {k: statistics.fmean([d[k] for d in ds if k in d]) for k in keys}
+
+
 def summarize(snaps: Sequence[Snapshot]) -> WindowStats:
     """온도는 중앙값(튐 무시)과 최댓값, 부하·전력·클럭은 평균, 여유 온도는 최솟값."""
     if not snaps:
@@ -141,6 +153,10 @@ def summarize(snaps: Sequence[Snapshot]) -> WindowStats:
         clock=_mean(c, lambda r: r.clock),
         perf_limit=_mean(c, lambda r: r.perf_limit),
         source=snaps[-1].cpu.source,
+        peak_temp=_max(c, lambda r: r.peak_temp),
+        thermal_frac=_mean(c, lambda r: r.thermal_frac),
+        prochot_frac=_mean(c, lambda r: r.prochot_frac),
+        limit_frac=_mean_dict([r.limit_frac for r in c]),
     )
     # 이유 비트는 창의 절반 이상에서 켜진 것만 (한 번 깜빡인 것은 무시)
     reasons = 0
@@ -157,6 +173,7 @@ def summarize(snaps: Sequence[Snapshot]) -> WindowStats:
         clock=_mean(g, lambda r: r.clock),
         clock_max=_max(g, lambda r: r.clock_max),
         reasons=reasons,
+        limit_frac=_mean_dict([r.limit_frac for r in g]),
     )
     fans = FanReading(
         cpu_rpm=_mean(snaps, lambda s: s.fans.cpu_rpm),

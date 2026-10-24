@@ -11,6 +11,15 @@ CPU_FAN = 0x00110013
 GPU_FAN = 0x00110014
 CPU_TEMP = 0x00120094
 PRESENT = 0x00010000
+# 이 노트북에서 본 최고 RPM 은 4000 대. EC 가 가끔 엉뚱한 값을 준다(부하 시험 중 GPU 팬 32300rpm 한 번).
+FAN_MAX_PLAUSIBLE = 9000
+
+
+def fan_rpm(raw: int | None) -> float | None:
+    if raw is None:
+        return None
+    rpm = raw * 100.0
+    return rpm if rpm <= FAN_MAX_PLAUSIBLE else None
 
 
 class AsusWmi:
@@ -37,8 +46,7 @@ class AsusWmi:
         return v & 0xFFFF
 
     def fans(self) -> tuple[float | None, float | None]:
-        c, g = self.dsts(CPU_FAN), self.dsts(GPU_FAN)
-        return (None if c is None else c * 100.0, None if g is None else g * 100.0)
+        return fan_rpm(self.dsts(CPU_FAN)), fan_rpm(self.dsts(GPU_FAN))
 
     def cpu_temp(self) -> float | None:
         v = self.dsts(CPU_TEMP)

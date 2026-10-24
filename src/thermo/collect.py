@@ -20,6 +20,9 @@ class Collector:
         if not self.admin:
             self.notes.append("관리자 권한이 없어 CPU 코어 온도·팬 속도를 읽지 못합니다.")
         self.lhm = self._open("lhm", "CPU 센서(LHM)를 열지 못했습니다")
+        self.fast = self._open("msr", "CPU 기록(MSR)을 읽지 못해 스로틀 이유를 알 수 없습니다") if self.admin else None
+        if self.fast is not None:
+            self.fast.start()
         self.asus = self._open("asus", "ASUS 팬·온도를 읽지 못했습니다") if self.admin else None
         self.gpu = self._open("gpu", "NVIDIA GPU 를 읽지 못했습니다")
         self.perf = self._open("perf", "CPU 성능 제한 카운터를 읽지 못했습니다")
@@ -35,6 +38,10 @@ class Collector:
             if kind == "lhm":
                 from .sensors.lhm import LhmCpu
                 return LhmCpu()
+            if kind == "msr":
+                from .fastloop import FastLoop
+                from .sensors.msr import Msr
+                return FastLoop(Msr())
             if kind == "asus":
                 from .sensors.asus import AsusWmi
                 return AsusWmi()
@@ -61,6 +68,16 @@ class Collector:
             if self.admin and not self._pawnio_noted:
                 self.notes.append("CPU 코어별 온도·전력은 PawnIO 가 없어 읽지 못합니다 (ASUS 온도로 대신).")
                 self._pawnio_noted = True
+        if self.fast is not None:
+            if self.fast.error and self.fast.error not in " ".join(self.notes):
+                self.notes.append(f"CPU 기록(MSR) 읽기가 멈췄습니다: {self.fast.error}")
+            fs = self.fast.take()
+            if fs.power is not None:
+                s.cpu.power = fs.power
+            s.cpu.peak_temp = fs.peak_temp
+            s.cpu.thermal_frac = fs.thermal_frac
+            s.cpu.prochot_frac = fs.prochot_frac
+            s.cpu.limit_frac = fs.limit_frac
         if s.cpu.load is None:
             s.cpu.load = psutil.cpu_percent(None)
         if self.perf is not None:
@@ -81,6 +98,9 @@ class Collector:
         return summarize(list(self.window))
 
     def close(self) -> None:
+        if self.fast is not None:
+            self.fast.stop.set()
+            self.fast.join(timeout=2)
         for x in (self.lhm, self.gpu):
             if x is not None:
                 try:
