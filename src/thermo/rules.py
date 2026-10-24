@@ -57,6 +57,11 @@ KNOWN_BACKGROUND = {
 class BaselineRef:
     p95: float
     n: int
+    median: float | None = None
+
+    @property
+    def ready(self) -> bool:
+        return self.n >= BASELINE_MIN_SAMPLES
 
 
 # (장치, 창 값) → 그 상황의 평소값. M3 에서 baseline.py 가 채운다.
@@ -112,7 +117,7 @@ def assess(stats: WindowStats, baseline: BaselineLookup | None = None) -> list[F
     if baseline is not None:
         for dev, temp in (("CPU", c.temp), ("GPU", g.temp)):
             ref = baseline(dev, stats) if temp is not None else None
-            if ref is None or ref.n < BASELINE_MIN_SAMPLES:
+            if ref is None or not ref.ready:
                 continue
             over = temp - ref.p95
             lvl = Level.BAD if over > BASELINE_BAD_OVER else Level.WARN if over > BASELINE_WARN_OVER else None
@@ -229,7 +234,32 @@ def extras(stats: WindowStats) -> list[Cause]:
 
 def diagnose(stats: WindowStats, baseline: BaselineLookup | None = None,
              fan_max: dict[str, float] | None = None) -> Verdict:
-    findings = assess(stats, baseline)
+    refs = {d: baseline(d, stats) for d in ("CPU", "GPU")} if baseline else {}
+    findings = assess(stats, (lambda d, _s: refs.get(d)) if baseline else None)
+    causes = find_causes(stats, findings, fan_max) if findings else []
+    findings, notes = _within_baseline(stats, findings, causes, refs)
     level = max((f.level for f in findings), default=Level.OK)
-    causes = find_causes(stats, findings, fan_max) if level >= Level.WARN else []
-    return Verdict(level, findings, causes, extras(stats), stats)
+    if level >= Level.WARN:
+        hot = {f.device for f in findings if f.level >= Level.WARN}
+        causes = [c for c in causes if c.device in hot] or find_causes(stats, findings, fan_max)
+    else:
+        causes = []
+    return Verdict(level, findings, causes, notes + extras(stats), stats, refs)
+
+
+def _within_baseline(stats: WindowStats, findings: list[Finding], causes: list[Cause],
+                     refs: dict[str, BaselineRef | None]) -> tuple[list[Finding], list[Cause]]:
+    """7장 규칙 1: 부하로 설명되는 '주의' 가 이 PC 의 평소 범위 안이면 정상으로 낮춘다. '이상' 은 낮추지 않는다."""
+    notes = []
+    for dev in ("CPU", "GPU"):
+        mine = [f for f in findings if f.device == dev]
+        ref = refs.get(dev)
+        temp = stats.cpu.temp if dev == "CPU" else stats.gpu.temp
+        if (not mine or any(f.level >= Level.BAD or f.rule != "absolute" for f in mine)
+                or not any(c.key == "high_load" and c.device == dev for c in causes)
+                or ref is None or not ref.ready or temp is None or temp > ref.p95):
+            continue
+        findings = [f for f in findings if f.device != dev]
+        notes.append(Cause("within_baseline", dev, {"temp": temp, "p95": ref.p95},
+                           [f"{dev} {temp:.0f}°C ≤ 평소 이 부하의 95%값 {ref.p95:.0f}°C (표본 {ref.n})"]))
+    return findings, notes

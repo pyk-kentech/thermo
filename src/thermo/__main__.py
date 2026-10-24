@@ -7,19 +7,24 @@ import sys
 import time
 
 from . import rules, text
+from .baseline import Baseline
 from .collect import WINDOW, Collector
 
 
 def once(seconds: int = WINDOW) -> str:
     col = Collector(window=seconds)
+    base = Baseline()
     try:
         for i in range(seconds):
             t0 = time.monotonic()
             col.sample()
             if i < seconds - 1:
                 time.sleep(max(0.0, 1.0 - (time.monotonic() - t0)))
-        return text.report(rules.diagnose(col.stats()))
+        v = rules.diagnose(col.stats(), base.lookup, base.fan_max())
+        base.record(v)
+        return text.report(v)
     finally:
+        base.close()
         col.close()
 
 

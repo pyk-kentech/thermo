@@ -199,5 +199,6 @@ class Verdict:
     level: Level
     findings: list[Finding]
     causes: list[Cause]       # 최대 2개
-    extras: list[Cause]       # 보조 문장 (배터리, 전원 계획)
+    extras: list[Cause]       # 보조 문장 (평소 범위 안, 배터리, 전원 계획)
     stats: WindowStats
+    baseline: dict = field(default_factory=dict)   # 장치 → rules.BaselineRef | None

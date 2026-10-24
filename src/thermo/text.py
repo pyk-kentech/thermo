@@ -35,6 +35,9 @@ def cause_sentence(c: Cause) -> str:
         return f"{dev} 가 온도 한계에 닿아 클럭을 낮추고 있습니다(열 스로틀)."
     if c.key == "power_limit":
         return f"{dev} 클럭이 온도가 아니라 전력 한도 때문에 제한되고 있습니다."
+    if c.key == "within_baseline":
+        return (f"{dev} 가 {d['temp']:.0f}°C 로 뜨겁지만 부하가 높고, "
+                f"이 PC 의 평소 범위(95%값 {d['p95']:.0f}°C) 안입니다.")
     if c.key == "battery":
         return "배터리로 동작 중이라 성능이 제한됩니다."
     if c.key == "perf_mode":
@@ -91,12 +94,30 @@ def table(s: WindowStats) -> list[str]:
     return rows
 
 
+def baseline_line(v: Verdict) -> str | None:
+    """평소값 상태 한 줄. 표본이 모자라면 '배우는 중'."""
+    from .rules import BASELINE_MIN_SAMPLES
+    parts = []
+    for dev in ("CPU", "GPU"):
+        ref = v.baseline.get(dev)
+        if ref is None:
+            continue
+        if ref.ready:
+            parts.append(f"{dev} 95%값 {ref.p95:.0f}°C (표본 {ref.n})")
+        else:
+            parts.append(f"{dev} 배우는 중 ({ref.n}/{BASELINE_MIN_SAMPLES})")
+    return ("평소값 " + " · ".join(parts)) if parts else None
+
+
 def report(v: Verdict) -> str:
     """--once 터미널 출력."""
     out = [f"● {v.level.label}"]
     out += [f"  {line}" for line in summary(v)]
     out.append("")
     out += table(v.stats)
+    bl = baseline_line(v)
+    if bl:
+        out.append(bl)
     ev = evidence(v)
     if ev:
         out.append("")
