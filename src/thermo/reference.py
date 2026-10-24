@@ -146,6 +146,21 @@ class StagePoint:
     cpu_thermal: float
     gpu_thermal: float
     gpu_power_cap: float
+    top: list[str] = field(default_factory=list)     # 그 구간 상위 프로세스 ("이름 CPU x% GPU y%")
+
+
+def top_processes(rows: list[dict], n: int = 4) -> list[str]:
+    """1초 기록의 상위 프로세스를 구간 평균으로. 기준 측정 자신(python)은 뺀다."""
+    cpu: dict[str, float] = {}
+    gpu: dict[str, float] = {}
+    for r in rows:
+        for name, _pid, c, g, _bg in json.loads(r.get("procs") or "[]"):
+            if name.lower() in ("python.exe", "pythonw.exe"):
+                continue
+            cpu[name] = cpu.get(name, 0) + c / len(rows)
+            gpu[name] = gpu.get(name, 0) + g / len(rows)
+    names = sorted(cpu, key=lambda k: -(cpu[k] + gpu[k]))
+    return [f"{k} CPU {cpu[k]:.1f}% GPU {gpu[k]:.0f}%" for k in names[:n] if cpu[k] + gpu[k] >= 1]
 
 
 def stage_point(stage: str, rows: list[dict], steady: bool) -> StagePoint:
@@ -157,6 +172,7 @@ def stage_point(stage: str, rows: list[dict], steady: bool) -> StagePoint:
         cpu_thermal=_mean(r["cpu_thermal_frac"] for r in rows) or 0.0,
         gpu_thermal=_mean(_limits(r, "gpu_limits").get("thermal") for r in rows) or 0.0,
         gpu_power_cap=_mean(_limits(r, "gpu_limits").get("power") for r in rows) or 0.0,
+        top=top_processes(rows),
     )
 
 
@@ -254,6 +270,8 @@ def summary(ref: Reference) -> list[str]:
         out.append(f"  {STAGE_NAMES.get(name, name) + (f' #{run}' if run else ''):<16} CPU {f(p.cpu_power, 'W', 1)} {f(p.cpu_temp, '°C')}"
                    f" · GPU {f(p.gpu_power, 'W', 1)} {f(p.gpu_temp, '°C')} · 팬 {f(p.fan_cpu)}/{f(p.fan_gpu)}rpm"
                    f" · CPU 열 스로틀 {p.cpu_thermal:.0%}" + ("" if p.steady else " (정상 상태 아님)"))
+        if p.top:
+            out.append(f"  {'':16} 돌던 프로그램: {', '.join(p.top)}")
     for m in (ref.cpu_model, ref.gpu_model):
         if m:
             terms = " ".join(f"{c:+.2f}°C/W×{k}" for k, c in m.coef.items())
