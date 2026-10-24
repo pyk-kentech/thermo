@@ -10,7 +10,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from .model import Level, Proc, WindowStats
-from .reference import Reference, expected_fan, model_temp
+from .reference import LinearModel, Reference, expected_fan, model_temp
 from .store import Steady, steady_state
 
 # 6.2 비교: 기준 측정의 흩어짐(σ)의 몇 배인가
@@ -32,6 +32,8 @@ POWER_LIMIT_RATIO = 0.8
 # 외부 PROCHOT
 PROCHOT_FRAC = 0.1
 PROCHOT_MAX_TEMP = 90
+# 패키지(가장 뜨거운 코어)와 코어 평균의 차가 이만큼이면 '한 코어에 몰린 부하'로 본다
+CONCENTRATION_GAP = 8
 # 모델 범위 밖으로 이만큼 넘으면 '범위 밖' 표시
 RANGE_MARGIN = 0.1
 
@@ -136,9 +138,18 @@ def _out_of_range(model, **x) -> list[str]:
     return out
 
 
+def pick_cpu_model(ref: Reference | None, avg_model: LinearModel | None, cpu) -> LinearModel | None:
+    """평소 기록으로 만든 코어 평균 모델이 있고 지금 코어 평균을 읽었으면 그것, 아니면 기준 측정의 CPU 모델."""
+    if avg_model is not None and cpu.temp_avg is not None:
+        return avg_model
+    return ref.cpu_model if ref else None
+
+
 def diagnose(stats: WindowStats, ref: Reference | None, steady: Steady,
-             ambient: dict[str, float] | None = None, ambient_now: bool = False) -> Diagnosis:
-    """ambient_now: 이 공회전 구간으로 방 온도 차이를 쟀다(그래서 이 구간의 기준 차이는 ±6°C 안이면 0 이 된다)."""
+             ambient: dict[str, float] | None = None, ambient_now: bool = False,
+             avg_model: LinearModel | None = None) -> Diagnosis:
+    """ambient_now: 이 공회전 구간으로 방 온도 차이를 쟀다(그래서 이 구간의 기준 차이는 ±6°C 안이면 0 이 된다).
+    avg_model: 평소 기록으로 만든 코어 평균 모델(calibrate.py). 있으면 CPU 비교에 그것을 쓴다."""
     c, g, f = stats.cpu, stats.gpu, stats.fans
     ambient = ambient or {}
     level = Level.OK
@@ -210,8 +221,7 @@ def diagnose(stats: WindowStats, ref: Reference | None, steady: Steady,
             keys.append("cpu_design_limit")
             judge.append(f"CPU 가 {c.power:.0f}W 를 쓰며 95°C 에 닿아 10초 중 {c.thermal_frac:.0%} 동안 속도를 낮췄습니다. "
                          "기준 측정 때도 이 전력에서 똑같이 묶였습니다 — 이 모드의 냉각 설계 한계이며 고장은 아닙니다(성능 손해는 있음).")
-    elif ref.cpu_model and model_temp(ref.cpu_model, c) is not None:
-        m = ref.cpu_model
+    elif (m := pick_cpu_model(ref, avg_model, c)) is not None and model_temp(m, c) is not None:
         ct = model_temp(m, c)
         what = "CPU 코어 평균" if m.target == "cpu_temp_avg" else "CPU"
         pred = m.predict(cpu_power=c.power, gpu_power=g.power)
@@ -236,6 +246,11 @@ def diagnose(stats: WindowStats, ref: Reference | None, steady: Steady,
             if hot_cooling:
                 judge.append(f"CPU 가 {c.power:.0f}W 에서 {ct:.0f}°C({what}) 입니다. "
                              f"이 노트북은 이 전력에서 보통 {pred + off:.0f}°C 입니다({resid:+.0f}°C).")
+                if m.target == "cpu_temp" and c.temp_avg is not None and c.temp is not None                         and c.temp - c.temp_avg >= CONCENTRATION_GAP:
+                    keys.append("concentrated_load")
+                    judge.append(f"다만 지금은 한 코어에 부하가 몰려 있습니다(가장 뜨거운 코어 {c.temp:.0f}°C, 코어 평균 "
+                                 f"{c.temp_avg:.0f}°C). 이때는 같은 전력이라도 더 뜨겁게 보이므로 냉각 문제가 아닐 수 있습니다 — "
+                                 "코어 평균 기준이 모이면 더 정확해집니다.")
     if ref.gpu_model and g.temp is not None:
         m = ref.gpu_model
         pred = m.predict(gpu_power=g.power, cpu_power=c.power)
@@ -334,8 +349,9 @@ class Diagnoser:
     공회전 때는 냉각 저하가 거의 드러나지 않으므로(전력이 작음) 이 차이는 주로 방 온도 차이다.
     """
 
-    def __init__(self, ref: Reference | None, history: int = 240) -> None:
+    def __init__(self, ref: Reference | None, history: int = 240, avg_model: LinearModel | None = None) -> None:
         self.ref = ref
+        self.avg_model = avg_model
         self.points: deque[tuple] = deque(maxlen=history)
         self.ambient: dict[str, float] = {}
         self._ambient_at: float | None = None
@@ -353,8 +369,9 @@ class Diagnoser:
             c, g = stats.cpu, stats.gpu
             if (c.power or 99) < IDLE_CPU_W and (g.power or 99) < IDLE_GPU_W and (c.thermal_frac or 0) == 0:
                 amb = {}
-                cpu_t = model_temp(self.ref.cpu_model, c) if self.ref.cpu_model else None
-                for dev, m, temp in (("CPU", self.ref.cpu_model, cpu_t), ("GPU", self.ref.gpu_model, g.temp)):
+                cm = pick_cpu_model(self.ref, self.avg_model, c)
+                cpu_t = model_temp(cm, c) if cm else None
+                for dev, m, temp in (("CPU", cm, cpu_t), ("GPU", self.ref.gpu_model, g.temp)):
                     if m and temp is not None:
                         p = m.predict(cpu_power=c.power, gpu_power=g.power)
                         if p is not None:
@@ -362,7 +379,7 @@ class Diagnoser:
                 if amb:
                     self.ambient, self._ambient_at = amb, now
                     measured = True
-        d = diagnose(stats, self.ref, st, self.ambient, measured)
+        d = diagnose(stats, self.ref, st, self.ambient, measured, self.avg_model)
         if "not_steady" not in d.keys and self.ref is not None:
             self.last = (now, d)
         elif self.last is not None and self.ref is not None:

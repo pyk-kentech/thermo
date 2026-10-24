@@ -22,7 +22,13 @@ def once(seconds: int = WINDOW) -> str:
     store = Store()
     try:
         ref, label = load_reference(store)
-        dg = Diagnoser(ref)
+        avg_model = None
+        if ref is not None:
+            from .calibrate import cached_core_avg_model
+            d = store.latest_checkup()
+            avg_model, avg_info = cached_core_avg_model(store, ref, d["id"] if d else None)
+            label = f"{label} · 코어 평균 기준: {avg_info}"
+        dg = Diagnoser(ref, avg_model=avg_model)
         for i in range(seconds):
             t0 = time.monotonic()
             s = col.sample()

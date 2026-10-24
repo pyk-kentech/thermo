@@ -60,12 +60,17 @@ class Monitor(threading.Thread):
             if getattr(col, "fast", None) is not None:
                 store.note("cpu_limits", vars(col.fast.limits))
             ref, label = load_reference(store)
-            self.out.put(("reference", ref, label))
+            avg_model, avg_info = None, None
+            if ref is not None and hasattr(store, "rows"):
+                from .calibrate import cached_core_avg_model
+                d = store.latest_checkup()
+                avg_model, avg_info = cached_core_avg_model(store, ref, d["id"] if d else None)
+            self.out.put(("reference", ref, label, avg_info))
             if hasattr(store, "rows"):     # 창을 다시 켰을 때 최근 10분을 그래프에 이어 그린다
                 from .store import snapshot_from_row
                 rows = store.rows(time.time() - HISTORY_SECONDS)
                 self.out.put(("history", [sample_tuple(snapshot_from_row(r)) for r in rows]))
-            dg = Diagnoser(ref)
+            dg = Diagnoser(ref, avg_model=avg_model)
             size = col.window.maxlen
             i = 0
             while not self.stop.is_set():
@@ -189,7 +194,7 @@ class App:
         self.evidence.config(text="\n".join(f"· {e}" for e in d.evidence) or "· 기준과 비교한 값이 아직 없습니다")
         self._notes(d.notes)
 
-    def show_reference(self, ref: Reference | None, label: str | None) -> None:
+    def show_reference(self, ref: Reference | None, label: str | None, avg_info: str | None = None) -> None:
         self.ref = ref
         self.ref_text.config(state="normal")
         self.ref_text.delete("1.0", "end")
@@ -198,7 +203,10 @@ class App:
                                        "하드웨어가 알려 준 사실만 봅니다.")
         else:
             self.ref_label.config(text=f"지금 기준: {label}. 같은 모드에서 다시 재면 첫 결과와 비교할 수 있습니다.")
-            self.ref_text.insert("1.0", "\n".join(summary(ref)))
+            lines = summary(ref)
+            if avg_info:
+                lines += ["", f"코어 평균 기준: {avg_info}"]
+            self.ref_text.insert("1.0", "\n".join(lines))
             self.mode.set(ref.mode)
         self.ref_text.config(state="disabled")
 
