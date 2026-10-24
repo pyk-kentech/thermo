@@ -211,6 +211,11 @@ D:\thermo\
 3. **M3 평소값** — `baseline` 과 테스트, 판정에 연결. (완료. 실측: `baseline.db` 생성, 'CPU 배우는 중 (0/30)' 표시)
 4. **M4 창** — tkinter 화면, 관리자 재실행. (완료. UAC 재실행 → 관리자 창, 관리자 없는 창 캡처로 배치 확인, 닫으면 프로세스 종료)
 5. **M5 마무리** — README, THIRD_PARTY_NOTICES, 바로가기. 실제로 부하를 줘서(예: 게임 실행) 판정이 맞게 바뀌는지 사용자와 확인. Armoury Crate 모드를 바꿔 가며 `0x00120075` 값의 뜻을 정한다.
+   - 2026-10-23: README, 바탕화면 바로가기(`tools/make_shortcut.py` → `thermo 온도 진단.lnk`, 대상 `.venv\Scripts	hermo.exe`), 시험 도구 `tools/stress.py`·`tools/watch_mode.py` 를 만들었다.
+   - 관리자 창을 게임(LoL)과 함께 몇 분 켜 둔 동안 ASUS WMI 를 1초마다 읽어도 문제가 없었다.
+   - **남은 것 (사용자 결정으로 나중에, 함께 한다):**
+     1. 부하 시험 — thermo 창을 켠 채 `tools/stress.py 90` 으로 CPU 를 100% 로 돌려, 판정이 '정상 → (고부하) 주의/평소 범위 안' 으로 맞게 바뀌고 원인 문장이 `python.exe` 를 짚는지 본다. 그 결과로 6·7장 문턱값을 다듬는다.
+     2. 성능 모드 — 관리자로 `pythonw tools/watch_mode.py --out 로그.txt` 를 켜 두고 Armoury Crate 에서 Silent → Performance → Turbo 를 20초씩 바꾼다. 따라 바뀌는 장치 ID 가 있으면 `sensors/asus.py` 에 읽기를 더하고 3장·6.3(묶음 키)을 고친다. 없으면 성능 모드는 '확인 불가' 로 확정한다.
 
 ## 11. 위험과 열린 질문
 
