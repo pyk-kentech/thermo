@@ -122,12 +122,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--room", type=float, help="기준 측정 때 방 온도(°C, 선택)")
     ap.add_argument("--rebuild", metavar="번호들", help="저장된 기준 측정(예: 1,2)을 합쳐 다시 계산한다. --mode 와 함께")
     ap.add_argument("--mode", help="--rebuild 때 성능 모드 이름")
+    ap.add_argument("--verify", nargs="?", const="all", metavar="시나리오",
+                    help="검증 시나리오를 차례로 진행한다(관리자 콘솔). 예: --verify idle,cpu")
     ap.add_argument("--out", help="결과를 이 파일에도 쓴다 (UTF-8)")
     ap.add_argument("--no-elevate", action="store_true", help="관리자 권한을 요청하지 않는다")
     ap.add_argument("--elevated", action="store_true", help=argparse.SUPPRESS)  # 재실행 표시
     a = ap.parse_args(argv)
     if a.checkup:
         return checkup(a.checkup, a.room)
+    if a.verify:
+        from .verify import run as verify_run
+        return verify_run(None if a.verify == "all" else a.verify.split(","))
     if a.rebuild:
         from .checkup import rebuild
         from .reference import summary

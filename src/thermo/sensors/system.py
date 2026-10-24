@@ -37,13 +37,14 @@ class Processes:
         self._procs: dict[int, psutil.Process] = {}
         self._ncpu = psutil.cpu_count() or 1
 
-    def top(self, n: int = 8, gpu_use: dict[int, float] | None = None) -> list[Proc]:
+    def top(self, n: int = 8, gpu_use: dict[int, float] | None = None, exclude: set[int] = frozenset()) -> list[Proc]:
+        """CPU·GPU 를 쓰는 상위 프로세스. exclude: 빼고 볼 pid(thermo 자신, 기준 측정의 부하 프로세스)."""
         alive = set()
         rows = []
         visible = visible_window_pids()
         names: dict[int, str] = {}
         for p in psutil.process_iter(["name"]):
-            if p.pid == 0:  # System Idle Process
+            if p.pid == 0 or p.pid in exclude:  # System Idle Process, thermo 자신
                 continue
             alive.add(p.pid)
             names[p.pid] = p.info["name"] or "?"

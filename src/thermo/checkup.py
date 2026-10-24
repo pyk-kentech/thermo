@@ -118,6 +118,8 @@ class Checkup:
     def _run_stage(self, st: Stage, cid: int) -> None:
         self.ui.say(f"[{st.title}] 시작" + (f" — CPU {st.threads}스레드 부하" if st.threads else ""))
         load = self.load(st.threads).start() if st.threads else None
+        if load is not None and hasattr(self.col, "exclude"):
+            self.col.exclude |= getattr(load, "pids", set())
         pts: list[tuple] = []
         start = hold_start = None
         steady = False

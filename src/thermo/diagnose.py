@@ -82,7 +82,7 @@ def _proc_lines(stats: WindowStats, n: int = 3) -> list[tuple[Proc, float | None
     """상위 프로세스와 그 프로세스 몫의 CPU 전력 추정(패키지 전력 × CPU 시간 몫)."""
     out = []
     load = stats.cpu.load or 0
-    for p in [p for p in stats.procs if p.name.lower() not in ("python.exe", "pythonw.exe")][:n]:
+    for p in stats.procs[:n]:
         watts = None
         if stats.cpu.power is not None and load > 1 and p.cpu > 0:
             watts = stats.cpu.power * min(1.0, p.cpu / load)

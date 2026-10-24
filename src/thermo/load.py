@@ -23,6 +23,10 @@ class CpuLoad:
             p.start()
         return self
 
+    @property
+    def pids(self) -> set[int]:
+        return {p.pid for p in self._procs if p.pid}
+
     def stop(self) -> None:
         self._stop.set()
         for p in self._procs:

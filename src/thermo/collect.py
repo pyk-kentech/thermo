@@ -30,6 +30,10 @@ class Collector:
         from .sensors.system import Processes
         self.procs = Processes()
         self.window: deque[Snapshot] = deque(maxlen=window)
+        # 판단에서 뺄 pid: thermo 자신과 기준 측정이 띄운 부하 프로세스. 사용자의 python 프로그램은 범인으로 보여야 하므로
+        # 이름(python.exe)으로 빼지 않는다(M10).
+        import os
+        self.exclude: set[int] = {os.getpid()}
         self._pawnio_noted = False
         psutil.cpu_percent(None)
 
@@ -90,7 +94,7 @@ class Collector:
             s.fans = FanReading(*self.asus.fans())
         if self.power is not None:
             s.power = self.power.read()
-        s.procs = self.procs.top(gpu_use=gpu_use)
+        s.procs = self.procs.top(gpu_use=gpu_use, exclude=self.exclude)
         self.window.append(s)
         return s
 
