@@ -136,10 +136,17 @@ class Store:
 
 
 # --- 정상 상태 판별 (DESIGN 2판 5장) ------------------------------------------
+#
+# M7 첫 기준 측정에서 1판 기준(60초 동안 1초 값이 모두 평균 ±15%/±3W 안)은 너무 엄격했다:
+# 공회전은 짧은 부스트(1초 51W)로, 게임은 장면 변화(10초 평균 GPU 26–40W)로 끝내 통과하지 못했다.
+# 열평형에서 중요한 것은 '평균이 움직이지 않는가'이므로, 120초를 앞뒤 60초로 나눠 평균을 비교하고,
+# 느리게 데워지는 쪽(GPU 온도·방열판)이 30초 묶음 사이에서 2°C 안에 머무는지를 본다.
+# CPU 칩 온도는 전력을 1–2초 안에 따라가므로(M6) 평형 판단에 쓰지 않는다.
 
-STEADY_SECONDS = 60
+STEADY_SECONDS = 120
 STEADY_REL = 0.15
 STEADY_ABS_W = 3.0
+STEADY_GPU_TEMP_C = 2.0
 
 
 @dataclass
@@ -148,22 +155,31 @@ class Steady:
     reason: str          # 아닐 때 한국어 이유
 
 
-def steady_state(points: Sequence[tuple[float, float | None, float | None]], now: float,
-                 seconds: float = STEADY_SECONDS) -> Steady:
-    """(시각, CPU W, GPU W) 목록에서 직전 seconds 초 동안 두 전력이 각각 평균 ±15%(또는 ±3W) 안이었나."""
-    recent = [p for p in points if now - seconds <= p[0] <= now]
+def steady_state(points: Sequence[tuple], now: float, seconds: float = STEADY_SECONDS) -> Steady:
+    """points: (시각, CPU W, GPU W[, GPU °C]). 직전 seconds 초가 열평형인가."""
+    recent = [p for p in points if now - seconds < p[0] <= now]
     if not recent or recent[-1][0] - recent[0][0] < seconds * 0.9:
         return Steady(False, f"아직 {seconds:.0f}초 동안 재지 못했습니다")
+    mid = now - seconds / 2
     for idx, dev in ((1, "CPU"), (2, "GPU")):
-        vals = [p[idx] for p in recent if p[idx] is not None]
-        if len(vals) < len(recent) * 0.9:
+        a = [p[idx] for p in recent if p[0] <= mid and p[idx] is not None]
+        b = [p[idx] for p in recent if p[0] > mid and p[idx] is not None]
+        if len(a) + len(b) < len(recent) * 0.9 or not a or not b:
             return Steady(False, f"{dev} 전력을 읽지 못한 때가 많습니다")
-        mean = sum(vals) / len(vals)
-        tol = max(STEADY_REL * mean, STEADY_ABS_W)
-        if any(abs(v - mean) > tol for v in vals):
-            return Steady(False, f"{dev} 전력이 바뀌는 중입니다({min(vals):.0f}–{max(vals):.0f}W)")
+        ma, mb = sum(a) / len(a), sum(b) / len(b)
+        if abs(mb - ma) > max(STEADY_REL * (ma + mb) / 2, STEADY_ABS_W):
+            return Steady(False, f"{dev} 전력 평균이 바뀌는 중입니다({ma:.0f}W → {mb:.0f}W)")
+    if len(recent[0]) > 3:
+        meds = []
+        for k in range(int(seconds // 30)):
+            lo = now - seconds + 30 * k
+            v = sorted(p[3] for p in recent if lo < p[0] <= lo + 30 and p[3] is not None)
+            if v:
+                meds.append(v[len(v) // 2])
+        if len(meds) >= 2 and max(meds) - min(meds) > STEADY_GPU_TEMP_C:
+            return Steady(False, f"GPU 온도가 아직 움직입니다({min(meds):.0f}–{max(meds):.0f}°C)")
     return Steady(True, "")
 
 
-def power_points(rows: Iterable[dict]) -> list[tuple[float, float | None, float | None]]:
-    return [(r["ts"], r["cpu_power"], r["gpu_power"]) for r in rows]
+def power_points(rows: Iterable[dict]) -> list[tuple]:
+    return [(r["ts"], r["cpu_power"], r["gpu_power"], r["gpu_temp"]) for r in rows]

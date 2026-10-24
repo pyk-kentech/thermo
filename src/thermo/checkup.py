@@ -1,12 +1,12 @@
 """기준 측정("건강검진") 진행 (DESIGN 2판 7장).
 
-단계마다 부하를 걸고, 정상 상태(전력·온도가 60초 동안 안정)에 닿으면 60초 더 재서 그 구간을 기준으로 쓴다.
+단계마다 부하를 걸고, 정상 상태(store.steady_state: 120초 동안 전력 평균·GPU 온도가 움직이지 않음)에 닿으면
+60초 더 재서 그 구간을 기준으로 쓴다.
 정상 상태에 못 닿고 단계 최대 시간이 지나면 마지막 60초를 남기되 '정상 상태 아님'으로 표시해 모델에서 뺀다.
 """
 
 from __future__ import annotations
 
-import statistics
 import time
 from dataclasses import dataclass
 from typing import Callable, Protocol
@@ -17,7 +17,6 @@ from .model import Snapshot
 from .store import Store, steady_state
 
 HOLD_SECONDS = 60
-TEMP_STEADY_C = 1.0          # 최근 30초와 그 앞 30초의 온도 중앙값 차
 GAME_MIN_GPU_W = 25.0        # 게임이 켜졌다고 볼 GPU 전력
 GAME_WAIT_SECONDS = 120
 
@@ -32,13 +31,16 @@ class Stage:
     fixed: bool = False      # 정상 상태를 기다리지 않고 정해진 시간만 잰다(식힘)
 
 
+# M7 첫 측정에서 CPU 4스레드(37W)부터 이미 95°C 에 묶였다 → 모델에 쓸 수 있는(묶이지 않은) 점을 얻으려고
+# 1·2·3스레드로 바꾸고, 지속 한도를 보는 16스레드만 남긴다.
 PLAN = [
     Stage("idle", "공회전", 0, False, 600),
-    Stage("cpu4", "CPU 4스레드", 4, False, 300),
-    Stage("cpu8", "CPU 8스레드", 8, False, 300),
+    Stage("cpu1", "CPU 1스레드", 1, False, 300),
+    Stage("cpu2", "CPU 2스레드", 2, False, 300),
+    Stage("cpu3", "CPU 3스레드", 3, False, 300),
     Stage("cpu16", "CPU 16스레드", 16, False, 300),
     Stage("gpu", "게임(GPU)", 0, True, 360),
-    Stage("both", "게임 + CPU 16스레드", 16, True, 300),
+    Stage("both", "게임 + CPU 16스레드", 16, True, 420),   # 첫 측정에서 300초로는 GPU 온도가 아직 오르는 중이었다
     Stage("cool", "식힘", 0, False, 180, fixed=True),
 ]
 
@@ -54,18 +56,6 @@ class Collector(Protocol):
 
 class Stopped(Exception):
     pass
-
-
-def temp_steady(points: list[tuple[float, float | None, float | None]], now: float) -> bool:
-    """(시각, CPU°C, GPU°C): 최근 30초와 그 앞 30초의 중앙값 차가 장치마다 1°C 이하."""
-    for idx in (1, 2):
-        a = [p[idx] for p in points if now - 30 < p[0] <= now and p[idx] is not None]
-        b = [p[idx] for p in points if now - 60 < p[0] <= now - 30 and p[idx] is not None]
-        if len(a) < 20 or len(b) < 20:
-            return False
-        if abs(statistics.median(a) - statistics.median(b)) > TEMP_STEADY_C:
-            return False
-    return True
 
 
 class Checkup:
@@ -107,8 +97,7 @@ class Checkup:
     def _run_stage(self, st: Stage, cid: int) -> None:
         self.ui.say(f"[{st.title}] 시작" + (f" — CPU {st.threads}스레드 부하" if st.threads else ""))
         load = self.load(st.threads).start() if st.threads else None
-        pts: list[tuple[float, float | None, float | None]] = []
-        temps: list[tuple[float, float | None, float | None]] = []
+        pts: list[tuple] = []
         start = hold_start = None
         steady = False
         note = ""
@@ -116,8 +105,7 @@ class Checkup:
             for i in range(st.max_seconds):
                 s = self._tick()
                 start = start or s.t
-                pts.append((s.t, s.cpu.power, s.gpu.power))
-                temps.append((s.t, s.cpu.temp, s.gpu.temp))
+                pts.append((s.t, s.cpu.power, s.gpu.power, s.gpu.temp))
                 bad = self._safety(s)
                 if bad:
                     note = f"안전 중단: {bad}"
@@ -130,7 +118,7 @@ class Checkup:
                                 + (" · 안정, 기준 재는 중" if hold_start else ""))
                 if st.fixed:
                     continue
-                if hold_start is None and steady_state(pts, s.t).steady and temp_steady(temps, s.t):
+                if hold_start is None and steady_state(pts, s.t).steady:
                     hold_start = s.t
                     self.ui.say(f"  정상 상태 도달 ({i}초). {self.hold_seconds}초 더 잽니다.")
                 if hold_start is not None and s.t - hold_start >= self.hold_seconds - 1:

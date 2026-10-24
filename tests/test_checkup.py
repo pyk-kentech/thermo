@@ -6,7 +6,7 @@ import random
 import pytest
 
 from thermo import reference as R
-from thermo.checkup import PLAN, Checkup, Stage, temp_steady
+from thermo.checkup import PLAN, Checkup, Stage
 from thermo.model import CpuReading, FanReading, GpuReading, PowerReading, Proc, Snapshot
 from thermo.store import Store
 
@@ -128,7 +128,7 @@ def test_full_checkup_recovers_model(store):
     assert g.coef["gpu_power"] == pytest.approx(GPU_B, abs=0.08)
     # CPU 16스레드는 95°C 에 묶임 → 온도 한계형, 모델에서 빠짐
     assert ref.cpu_thermal_limited
-    assert "cpu16" not in m.stages and "both" not in m.stages
+    assert "cpu16" not in m.stages
     assert any("95°C 에 묶인" in n for n in ref.notes)
     assert ref.cpu_sustained_w == pytest.approx((95 - CPU_A - CPU_C * 4) / CPU_B, abs=1)
     assert ref.gpu_sustained_w == pytest.approx(70, abs=1)
@@ -136,7 +136,7 @@ def test_full_checkup_recovers_model(store):
     # 저장됐다
     saved = store.latest_checkup("Performance")
     assert R.Reference.from_json(saved["result"]).cpu_model.coef == m.coef
-    assert len(store.checkup_stages(saved["id"])) == 7
+    assert len(store.checkup_stages(saved["id"])) == len(PLAN)
 
 
 def test_expected_fan_curve(store):
@@ -158,7 +158,7 @@ def test_stop_when_user_quits_at_game(store):
 
 
 def test_unsteady_stage_marked_and_excluded(store):
-    plan = [Stage("idle", "공회전", 0, False, 30)]   # 30초로는 정상 상태(60초+60초)에 못 닿음
+    plan = [Stage("idle", "공회전", 0, False, 60)]   # 60초로는 정상 상태(120초+60초)에 못 닿음
     ref, ui, _ = run_checkup(store, plan=plan)
     assert ref is not None
     assert ref.stages[0].steady is False
@@ -172,13 +172,6 @@ def test_warns_busy_program_and_adapter(store):
     text = "\n".join(ui.lines)
     assert "어댑터가 빠져" in text
     assert "chrome.exe 20%" in text
-
-
-def test_temp_steady():
-    flat = [(float(t), 70.0, 50.0) for t in range(61)]
-    assert temp_steady(flat, 60)
-    rising = [(float(t), 60 + t * 0.1, 50.0) for t in range(61)]
-    assert not temp_steady(rising, 60)
 
 
 def test_fit_drops_narrow_input():

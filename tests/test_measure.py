@@ -140,36 +140,48 @@ def test_store_meta(store):
     assert store.db.execute("SELECT key FROM meta").fetchone()[0] == "cpu_limits"
 
 
-# --- 정상 상태 ------------------------------------------------------------------
+# --- 정상 상태 (120초, 앞뒤 60초 평균 + GPU 온도 30초 중앙값) -------------------
 def pts(values, start=0.0):
-    return [(start + i, c, g) for i, (c, g) in enumerate(values)]
+    return [(start + i, *v) for i, v in enumerate(values)]
 
 
 def test_steady_when_power_flat():
-    p = pts([(40 + (i % 3), 20.0) for i in range(61)])
-    assert steady_state(p, now=60).steady
+    p = pts([(40 + (i % 3), 20.0) for i in range(121)])
+    assert steady_state(p, now=120).steady
 
 
-def test_not_steady_when_power_changes():
-    p = pts([(10.0, 5.0)] * 30 + [(45.0, 5.0)] * 31)
-    r = steady_state(p, now=60)
+def test_steady_tolerates_spikes_around_flat_mean():
+    # 실제 공회전처럼 가끔 1초 50W 부스트가 섞여도 평균이 같으면 정상 상태
+    p = pts([(50.0 if i % 20 == 0 else 8.0, 3.0) for i in range(121)])
+    assert steady_state(p, now=120).steady
+
+
+def test_steady_tolerates_game_fluctuation():
+    # 게임: GPU 25–40W 를 오가지만 평균은 그대로
+    p = pts([(21.0, 25.0 + 15 * ((i // 7) % 2), 60.0) for i in range(121)])
+    assert steady_state(p, now=120).steady
+
+
+def test_not_steady_when_mean_moves():
+    p = pts([(10.0, 5.0)] * 60 + [(30.0, 5.0)] * 61)
+    r = steady_state(p, now=120)
     assert not r.steady and "CPU" in r.reason
 
 
+def test_not_steady_when_gpu_temp_still_rising():
+    p = pts([(20.0, 35.0, 60 + i / 30) for i in range(121)])
+    r = steady_state(p, now=120)
+    assert not r.steady and "GPU 온도" in r.reason
+
+
 def test_not_steady_when_too_short():
-    assert not steady_state(pts([(10.0, 5.0)] * 20), now=19).steady
-
-
-def test_small_power_uses_absolute_tolerance():
-    # 2W↔4W 는 비율로는 크지만 ±3W 안이라 정상 상태
-    p = pts([(2.0 if i % 2 else 4.0, 1.0) for i in range(61)])
-    assert steady_state(p, now=60).steady
+    assert not steady_state(pts([(10.0, 5.0)] * 40), now=39).steady
 
 
 def test_power_points(store):
     for t in range(3):
         store.add(snap(t, cpu_w=10 + t))
-    assert power_points(store.rows(0))[2] == (2, 12.0, 10.0)
+    assert power_points(store.rows(0))[2] == (2, 12.0, 10.0, 55)
 
 
 def test_fan_glitch_filtered():
