@@ -126,7 +126,7 @@ class Checkup:
             for i in range(st.max_seconds):
                 s = self._tick()
                 start = start or s.t
-                pts.append((s.t, s.cpu.power, s.gpu.power, s.gpu.temp))
+                pts.append((s.t, s.cpu.power, s.gpu.power, s.gpu.temp, s.fans.cpu_rpm))
                 bad = self._safety(s)
                 if bad:
                     note = f"안전 중단: {bad}"
@@ -188,6 +188,7 @@ class Checkup:
                     game_on = False
                 self._run_stage(st, cid)
             ref = reference.build(self.mode, self.room, self.stage_rows)
+            reference.apply_runtime_sigma(ref, *runtime_residuals(self.store, [cid], ref))
             self.store.checkup_end(cid, "완료", ref.to_json())
             self.ui.say("기준 측정을 마쳤습니다.")
             for line in reference.summary(ref):
@@ -230,13 +231,40 @@ def stage_holds(store: Store, cid: int, hold_seconds: int = HOLD_SECONDS) -> lis
         if s["stage"] == "cool":
             continue
         rows = store.rows(s["start"], s["end"] + 0.5)
-        pts = [(r["ts"], r["cpu_power"], r["gpu_power"], r["gpu_temp"]) for r in rows]
+        pts = [(r["ts"], r["cpu_power"], r["gpu_power"], r["gpu_temp"], r["fan_cpu"]) for r in rows]
         hold = next((i for i in range(len(rows)) if steady_state(pts[:i + 1], rows[i]["ts"]).steady), None)
         if hold is not None and hold + hold_seconds <= len(rows):
             out.append((s["stage"], rows[hold:hold + hold_seconds], True))
         else:
             out.append((s["stage"], rows[-hold_seconds:], False))
     return out
+
+
+def runtime_residuals(store: Store, cids: list[int], ref: reference.Reference) -> tuple[list[float], list[float]]:
+    """기준 측정 기록 전체를 실제 판단처럼 10초 구간으로 돌려, 정상 상태로 판정된 구간의 모델 잔차를 모은다."""
+    from .model import summarize
+    from .store import snapshot_from_row
+    cpu_res: list[float] = []
+    gpu_res: list[float] = []
+    for cid in cids:
+        for s in store.checkup_stages(cid):
+            snaps = [snapshot_from_row(r) for r in store.rows(s["start"], s["end"] + 0.5)]
+            pts: list[tuple] = []
+            for i, sn in enumerate(snaps):
+                pts.append((sn.t, sn.cpu.power, sn.gpu.power, sn.gpu.temp, sn.fans.cpu_rpm))
+                if i % 10 != 9 or not steady_state(pts, sn.t).steady:
+                    continue
+                w = summarize(snaps[i - 9:i + 1])
+                if ref.cpu_model and (w.cpu.thermal_frac or 0) <= reference.THROTTLE_FRAC:
+                    t = reference.model_temp(ref.cpu_model, w.cpu)
+                    p = ref.cpu_model.predict(cpu_power=w.cpu.power, gpu_power=w.gpu.power)
+                    if t is not None and p is not None:
+                        cpu_res.append(t - p)
+                if ref.gpu_model and w.gpu.temp is not None:
+                    p = ref.gpu_model.predict(gpu_power=w.gpu.power, cpu_power=w.cpu.power)
+                    if p is not None:
+                        gpu_res.append(w.gpu.temp - p)
+    return cpu_res, gpu_res
 
 
 def rebuild(store: Store, ids: list[int], mode: str) -> reference.Reference:
@@ -249,6 +277,7 @@ def rebuild(store: Store, ids: list[int], mode: str) -> reference.Reference:
     for cid in ids:
         stages += [(f"{name}#{cid}", rows, steady) for name, rows, steady in stage_holds(store, cid)]
     ref = reference.build(mode, None, stages)
+    reference.apply_runtime_sigma(ref, *runtime_residuals(store, ids, ref))
     ref.notes.insert(0, f"기준 측정 {', '.join(f'#{i}' for i in ids)} 기록을 합쳐 다시 계산했습니다")
     cid = store.checkup_begin(mode, None)
     store.checkup_end(cid, "완료", ref.to_json())

@@ -1,5 +1,5 @@
 """python -m thermo        : 창을 띄운다 (관리자 권한이 없으면 UAC 로 다시 띄움)
-python -m thermo --once : 10초 재고 판정을 터미널에 쓴다.
+python -m thermo --once [--seconds 130] : 재고 판단을 터미널에 쓴다. 기준과의 비교는 정상 상태(120초)가 필요하다.
 python -m thermo --record 초 --out 파일 : 1초 표본을 thermo.db 에 기록하고 초마다 한 줄로 쓴다(시험용).
 python -m thermo --checkup 모드이름 [--room 24] : 기준 측정(건강검진)을 콘솔 창에서 진행한다(관리자)."""
 
@@ -11,25 +11,28 @@ import sys
 import time
 from pathlib import Path
 
-from . import rules, text
-from .baseline import Baseline
+from . import text
 from .collect import WINDOW, Collector
 
 
 def once(seconds: int = WINDOW) -> str:
-    col = Collector(window=seconds)
-    base = Baseline()
+    from .diagnose import Diagnoser, load_reference
+    from .store import Store
+    col = Collector()
+    store = Store()
     try:
+        ref, label = load_reference(store)
+        dg = Diagnoser(ref)
         for i in range(seconds):
             t0 = time.monotonic()
-            col.sample()
+            s = col.sample()
+            store.add(s)
+            dg.add(s.t, s.cpu.power, s.gpu.power, s.gpu.temp, s.fans.cpu_rpm)
             if i < seconds - 1:
                 time.sleep(max(0.0, 1.0 - (time.monotonic() - t0)))
-        v = rules.diagnose(col.stats(), base.lookup, base.fan_max())
-        base.record(v)
-        return text.report(v)
+        return text.report(dg.diagnose(col.stats(), s.t), label)
     finally:
-        base.close()
+        store.close()
         col.close()
 
 
@@ -75,7 +78,7 @@ def record(seconds: int, out: str | None) -> str:
 
 
 def checkup(mode: str, room: float | None) -> int:
-    from .baseline import home
+    from .paths import home
     from .checkup import Checkup, ConsoleUI
     from .store import Store
     sys.stdout.reconfigure(encoding="utf-8")

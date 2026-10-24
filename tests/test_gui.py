@@ -3,10 +3,12 @@ from collections import deque
 
 import pytest
 
-from thermo import gui, rules
+from thermo import gui
+from thermo.diagnose import diagnose
 from thermo.model import CpuReading, Level, Proc, Snapshot
+from thermo.store import Steady
 
-from test_rules import make
+from fake import make, reference
 
 tk = pytest.importorskip("tkinter")
 
@@ -33,36 +35,48 @@ def root(tk_root):
         pass
 
 
-def test_measuring_then_verdict(root):
+def hot_diag():
+    s = make(cpu={"temp": 95, "power": 20, "load": 60, "thermal_frac": 0.4, "clock": 3900},
+             fans={"cpu_rpm": 3700}, procs=[Proc("blender.exe", 10, cpu=50)])
+    return diagnose(s, reference(), Steady(True, ""))
+
+
+def test_measuring_then_diagnosis(root):
     app = gui.App(root, None)
     assert "측정 중" in app.level.cget("text")
-    v = rules.diagnose(make(cpu={"temp": 92, "load": 85, "power": 60, "clock": 3900},
-                            procs=[Proc("blender.exe", 10, cpu=70)]))
-    app.queue.put(("verdict", v))
+    app.queue.put(("reference", "기준 측정 #5 (2026-10-24, Performance 모드)"))
+    app.queue.put(("verdict", hot_diag()))
     app.poll()
-    assert app.level.cget("text") == "● 주의"
-    assert app.level.cget("fg") == gui.COLORS[Level.WARN]
-    assert "blender.exe" in app.summary.cget("text")
-    assert [c.cget("text") for c in app.cells["CPU"]] == ["92°C", "85%", "60W", "3.9GHz"]
-    assert "3300rpm" in app.fans.cget("text")
+    assert app.level.cget("text").startswith("● 이상")
+    assert app.level.cget("fg") == gui.COLORS[Level.BAD]
+    assert "→ CPU 가 20W 에서 95°C" in app.summary.cget("text")
+    assert [c.cget("text") for c in app.cells["CPU"]] == ["95°C", "60%", "20W", "3.9GHz"]
+    assert app.baseline.cget("text") == "기준: 기준 측정 #5 (2026-10-24, Performance 모드)"
 
 
 def test_evidence_toggle(root):
     app = gui.App(root, None)
-    app.show_verdict(rules.diagnose(make(cpu={"temp": 98, "load": 85})))
+    app.show_verdict(hot_diag())
     assert not app.evidence.winfo_ismapped()
     app.toggle_evidence()
     root.update()
-    assert "98°C" in app.evidence.cget("text")
+    assert "스로틀" in app.evidence.cget("text")
     assert app.ev_button.cget("text") == "근거 ▾"
 
 
-def test_only_latest_message_shown(root):
+def test_only_latest_verdict_shown(root):
     app = gui.App(root, None)
-    app.queue.put(("verdict", rules.diagnose(make(cpu={"temp": 98, "load": 85}))))
-    app.queue.put(("verdict", rules.diagnose(make())))
+    app.queue.put(("verdict", hot_diag()))
+    app.queue.put(("verdict", diagnose(make(), None, Steady(True, ""))))
     app.poll()
-    assert app.level.cget("text") == "● 정상"
+    assert app.level.cget("text").startswith("● 정상")
+    assert "기준 측정 전" in app.notes.cget("text")
+
+
+def test_no_reference_label(root):
+    app = gui.App(root, None)
+    app.show_reference(None)
+    assert "기준 측정 전" in app.baseline.cget("text")
 
 
 def test_error_and_notes(root):
@@ -81,7 +95,9 @@ class FakeCollector:
         self.closed = False
 
     def sample(self):
-        self.window.append(Snapshot(t=0, cpu=CpuReading(temp=60, load=20)))
+        s = Snapshot(t=float(len(self.window)), cpu=CpuReading(temp=60, load=20, power=10))
+        self.window.append(s)
+        return s
 
     def stats(self):
         from thermo.model import summarize
@@ -91,47 +107,46 @@ class FakeCollector:
         self.closed = True
 
 
-class FakeBaseline:
+class FakeStore:
     def __init__(self):
-        self.recorded = 0
+        self.added = 0
         self.closed = False
 
-    def lookup(self, dev, s):
+    def add(self, s):
+        self.added += 1
+
+    def note(self, *a):
+        pass
+
+    def latest_checkup(self, mode=None):
         return None
-
-    def fan_max(self):
-        return {}
-
-    def record(self, v):
-        self.recorded += 1
-        return True
 
     def close(self):
         self.closed = True
 
 
-def test_monitor_flow(monkeypatch):
-    monkeypatch.setattr(gui, "RECORD_EVERY", 4)
-    col, base = FakeCollector(), FakeBaseline()
+def test_monitor_flow():
+    col, store = FakeCollector(), FakeStore()
     q = queue.Queue()
-    m = gui.Monitor(q, lambda: col, lambda: base, interval=0.001)
+    m = gui.Monitor(q, lambda: col, lambda: store, interval=0.001)
     kinds = []
     m.start()
     while len(kinds) < 8:
         kinds.append(q.get(timeout=5)[0])
     m.stop.set()
     m.join(timeout=5)
-    assert kinds[:2] == ["measuring", "measuring"]   # 창(3초)이 찰 때까지
+    assert kinds[0] == "reference"
+    assert kinds[1:3] == ["measuring", "measuring"]   # 창(3초)이 찰 때까지
     assert "verdict" in kinds
-    assert base.recorded >= 1
-    assert col.closed and base.closed
+    assert store.added >= 3
+    assert col.closed and store.closed
 
 
 def test_monitor_reports_error():
     def broken():
         raise RuntimeError("센서 없음")
     q = queue.Queue()
-    m = gui.Monitor(q, broken, FakeBaseline, interval=0.001)
+    m = gui.Monitor(q, broken, FakeStore, interval=0.001)
     m.start()
     m.join(timeout=5)
     kind, msg = q.get(timeout=1)

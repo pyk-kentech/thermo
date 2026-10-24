@@ -41,10 +41,12 @@ class Processes:
         alive = set()
         rows = []
         visible = visible_window_pids()
+        names: dict[int, str] = {}
         for p in psutil.process_iter(["name"]):
             if p.pid == 0:  # System Idle Process
                 continue
             alive.add(p.pid)
+            names[p.pid] = p.info["name"] or "?"
             q = self._procs.setdefault(p.pid, p)
             try:
                 cpu = q.cpu_percent(None) / self._ncpu
@@ -52,7 +54,12 @@ class Processes:
                 continue
             gpu = (gpu_use or {}).get(p.pid, 0.0)
             if cpu > 0 or gpu > 0:
-                rows.append(Proc(p.info["name"] or "?", p.pid, cpu, gpu, p.pid not in visible))
+                rows.append(Proc(names[p.pid], p.pid, cpu, gpu))
+        # 여러 프로세스로 도는 앱(ChatGPT·Claude·브라우저 등)은 창을 가진 프로세스와 일하는 프로세스가 다르다(M8 실측).
+        # 같은 이름의 프로세스 중 하나라도 보이는 창이 있으면 '창 있음'으로 본다.
+        windowed = {names[pid] for pid in visible if pid in names}
+        for r in rows:
+            r.background = r.name not in windowed
         for pid in set(self._procs) - alive:
             del self._procs[pid]
         rows.sort(key=lambda r: max(r.cpu, r.gpu), reverse=True)

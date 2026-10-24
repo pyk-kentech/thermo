@@ -34,6 +34,7 @@ GPU_THERMAL_MASK = GPU_SW_THERMAL | GPU_HW_THERMAL
 class CpuReading:
     temp: float | None = None          # 패키지 온도 (LHM, 없으면 ASUS EC)
     temp_max: float | None = None      # 가장 뜨거운 코어
+    temp_avg: float | None = None      # 코어 평균 (LHM 'Core Average'). 냉각 비교용 — 한 코어에 몰린 부하에 덜 흔들린다
     tj_distance: float | None = None   # TjMax 까지 가장 작은 거리
     load: float | None = None          # 전체 사용률 %
     power: float | None = None         # 패키지 전력 W
@@ -147,6 +148,7 @@ def summarize(snaps: Sequence[Snapshot]) -> WindowStats:
     cpu = CpuReading(
         temp=_median(c, lambda r: r.temp),
         temp_max=_max(c, lambda r: r.temp_max if r.temp_max is not None else r.temp),
+        temp_avg=_median(c, lambda r: r.temp_avg),
         tj_distance=_min(c, lambda r: r.tj_distance),
         load=_mean(c, lambda r: r.load),
         power=_mean(c, lambda r: r.power),
@@ -189,33 +191,3 @@ def summarize(snaps: Sequence[Snapshot]) -> WindowStats:
     procs = sorted(acc.values(), key=lambda p: max(p.cpu, p.gpu), reverse=True)
     notes = list(dict.fromkeys(n for s in snaps for n in s.notes))
     return WindowStats(len(snaps), cpu, gpu, fans, snaps[-1].power, procs, notes)
-
-
-@dataclass
-class Finding:
-    """6장 기준 하나가 걸린 것."""
-
-    device: str          # "CPU" | "GPU"
-    level: Level
-    rule: str            # "absolute" | "load" | "baseline"
-    evidence: str
-
-
-@dataclass
-class Cause:
-    """7장 원인 하나. 문장은 text.py 가 key·data 로 만든다."""
-
-    key: str
-    device: str
-    data: dict = field(default_factory=dict)
-    evidence: list[str] = field(default_factory=list)
-
-
-@dataclass
-class Verdict:
-    level: Level
-    findings: list[Finding]
-    causes: list[Cause]       # 최대 2개
-    extras: list[Cause]       # 보조 문장 (평소 범위 안, 배터리, 전원 계획)
-    stats: WindowStats
-    baseline: dict = field(default_factory=dict)   # 장치 → rules.BaselineRef | None

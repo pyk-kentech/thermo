@@ -174,6 +174,18 @@ def test_not_steady_when_gpu_temp_still_rising():
     assert not r.steady and "GPU 온도" in r.reason
 
 
+def test_not_steady_when_last_ten_seconds_change():
+    p = pts([(30.0, 5.0)] * 111 + [(12.0, 5.0)] * 10)
+    r = steady_state(p, now=120)
+    assert not r.steady and "지금 바뀌고" in r.reason
+
+
+def test_not_steady_while_fan_ramps():
+    p = pts([(30.0, 5.0, 55.0, 0.0 if i < 60 else 3300.0) for i in range(121)])
+    r = steady_state(p, now=120)
+    assert not r.steady and "팬" in r.reason
+
+
 def test_not_steady_when_too_short():
     assert not steady_state(pts([(10.0, 5.0)] * 40), now=39).steady
 
@@ -181,7 +193,7 @@ def test_not_steady_when_too_short():
 def test_power_points(store):
     for t in range(3):
         store.add(snap(t, cpu_w=10 + t))
-    assert power_points(store.rows(0))[2] == (2, 12.0, 10.0, 55)
+    assert power_points(store.rows(0))[2] == (2, 12.0, 10.0, 55, None)
 
 
 def test_fan_glitch_filtered():
@@ -190,3 +202,9 @@ def test_fan_glitch_filtered():
     assert fan_rpm(0) == 0
     assert fan_rpm(323) is None     # 실제로 본 튐 값 32300rpm
     assert fan_rpm(None) is None
+
+
+def test_idle_fan_cycling_does_not_block_steady():
+    # 공회전(9W): EC 가 팬을 0↔2500rpm 으로 오가게 해도 정상 상태
+    p = pts([(9.0, 3.0, 52.0, 0.0 if (i // 20) % 2 == 0 else 2500.0) for i in range(121)])
+    assert steady_state(p, now=120).steady

@@ -28,6 +28,8 @@ class LhmCpu:
                 if kind == "Temperature":
                     if name == "CPU Package":
                         r.temp = v
+                    elif name == "Core Average":
+                        r.temp_avg = v
                     elif name.endswith("Distance to TjMax"):
                         dists.append(v)
                     elif "Core #" in name:

@@ -1,6 +1,9 @@
 """기준 측정 데이터로 이 노트북의 기준을 만든다 (DESIGN 2판 6.2·7장). 순수 함수.
 
 - 기대 온도 모델: 정상 상태에서 T = a + b·P_cpu + c·P_gpu (CPU·GPU 따로).
+  CPU 는 기록에 코어 평균 온도가 있으면 그것을 쓴다(M8: 패키지 온도는 가장 뜨거운 코어라, 1스레드처럼 한 코어에 몰린
+  부하에서 같은 전력이라도 8°C 까지 높게 나와 냉각 비교를 흐린다). 없으면 패키지 온도.
+- 흩어짐 σ 는 실제 판단과 같은 방식(10초 구간, 정상 상태 판정을 통과한 것)으로 잰 잔차 RMS 와 맞춤 σ 중 큰 값.
   화면 판정이 10초 창의 중앙값으로 하므로, 모델도 10초 묶음(온도 중앙값, 전력 평균)으로 맞춘다.
   95°C 열 스로틀 중인 묶음은 넣지 않는다 — 온도가 95°C 에 묶여 있어 전력과의 관계가 끊기기 때문.
 - 팬 곡선: 정상 상태 단계마다 (온도, 팬 RPM).
@@ -49,6 +52,7 @@ class Block:
     fan_gpu: float | None
     cpu_thermal: float           # 열 스로틀 비율 평균
     gpu_thermal: float
+    cpu_temp_avg: float | None = None
 
 
 def blocks(stage: str, rows: list[dict], seconds: int = BLOCK_SECONDS) -> list[Block]:
@@ -65,6 +69,7 @@ def blocks(stage: str, rows: list[dict], seconds: int = BLOCK_SECONDS) -> list[B
             fan_gpu=_med(r["fan_gpu"] for r in part),
             cpu_thermal=_mean(r["cpu_thermal_frac"] for r in part) or 0.0,
             gpu_thermal=_mean(_limits(r, "gpu_limits").get("thermal") for r in part) or 0.0,
+            cpu_temp_avg=_med(r.get("cpu_temp_avg") for r in part),
         ))
     return out
 
@@ -214,7 +219,10 @@ def build(mode: str, room: float | None, stages: list[tuple[str, list[dict], boo
     dropped = len(steady_blocks) - len(cpu_data)
     if dropped:
         notes.append(f"CPU 가 95°C 에 묶인 10초 묶음 {dropped}개는 CPU 모델에서 뺐습니다")
-    cpu_model = fit("cpu_temp", ["cpu_power", "gpu_power"], cpu_data)
+    use_avg = bool(cpu_data) and all(b.cpu_temp_avg is not None for b in cpu_data)
+    cpu_model = fit("cpu_temp_avg" if use_avg else "cpu_temp", ["cpu_power", "gpu_power"], cpu_data)
+    if not use_avg:
+        notes.append("기록에 코어 평균 온도가 없어 CPU 모델은 패키지 온도로 만들었습니다(한 코어에 몰린 부하에서 덜 정확)")
     gpu_model = fit("gpu_temp", ["gpu_power", "cpu_power"], gpu_data)
     if cpu_model is None:
         notes.append("CPU 모델을 만들 만큼 자료가 없습니다")
@@ -239,6 +247,26 @@ def build(mode: str, room: float | None, stages: list[tuple[str, list[dict], boo
         idle_cpu_temp=idle.cpu_temp if idle else None, idle_gpu_temp=idle.gpu_temp if idle else None,
         notes=notes + (cpu_model.notes if cpu_model else []) + (gpu_model.notes if gpu_model else []),
     )
+
+
+def apply_runtime_sigma(ref: Reference, cpu_resid: list[float], gpu_resid: list[float]) -> None:
+    """실제 판단 방식으로 잰 잔차로 σ 를 고친다(맞춤 σ 보다 작아지지는 않는다)."""
+    for m, res in ((ref.cpu_model, cpu_resid), (ref.gpu_model, gpu_resid)):
+        if m is None or len(res) < 5:
+            continue
+        rms = math.sqrt(sum(e * e for e in res) / len(res))
+        if rms > m.sigma + 0.05:
+            m.notes.append(f"σ 를 맞춤값 {m.sigma:.1f}°C 에서 실제 판단 방식(10초 구간 {len(res)}개)의 {rms:.1f}°C 로 넓혔습니다")
+            ref.notes.append(m.notes[-1])
+            m.sigma = rms
+
+
+def model_temp(m: LinearModel, cpu) -> float | None:
+    """모델이 쓰는 CPU 온도 값 (코어 평균 또는 패키지)."""
+    return cpu.temp_avg if m.target == "cpu_temp_avg" else cpu.temp
+
+
+TARGET_NAMES = {"cpu_temp": "CPU 패키지 온도", "cpu_temp_avg": "CPU 코어 평균 온도", "gpu_temp": "GPU 온도"}
 
 
 def expected_fan(curve: list[tuple[float, float]], temp: float) -> float | None:
@@ -275,7 +303,7 @@ def summary(ref: Reference) -> list[str]:
     for m in (ref.cpu_model, ref.gpu_model):
         if m:
             terms = " ".join(f"{c:+.2f}°C/W×{k}" for k, c in m.coef.items())
-            out.append(f"{m.target} 모델: {m.intercept:.1f}°C {terms} (흩어짐 σ {m.sigma:.1f}°C, 10초 묶음 {m.n}개)")
+            out.append(f"{TARGET_NAMES.get(m.target, m.target)} 모델: {m.intercept:.1f}°C {terms} (흩어짐 σ {m.sigma:.1f}°C, 10초 묶음 {m.n}개)")
     if ref.cpu_sustained_w is not None:
         out.append(f"CPU 최대 부하 지속 전력 {ref.cpu_sustained_w:.0f}W — "
                    + ("95°C 에 묶여 온도가 한계" if ref.cpu_thermal_limited else "온도 여유 있음(전력 한도가 한계)"))
