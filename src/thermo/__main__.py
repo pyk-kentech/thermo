@@ -1,0 +1,46 @@
+"""python -m thermo --once : 10초 재고 판정을 터미널에 쓴다. (창은 M4)"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+
+from . import rules, text
+from .collect import WINDOW, Collector
+
+
+def once(seconds: int = WINDOW) -> str:
+    col = Collector(window=seconds)
+    try:
+        for i in range(seconds):
+            t0 = time.monotonic()
+            col.sample()
+            if i < seconds - 1:
+                time.sleep(max(0.0, 1.0 - (time.monotonic() - t0)))
+        return text.report(rules.diagnose(col.stats()))
+    finally:
+        col.close()
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="thermo", description="FX707VU 온도 진단")
+    ap.add_argument("--once", action="store_true", help="한 번 재고 터미널에 결과를 쓴다")
+    ap.add_argument("--seconds", type=int, default=WINDOW, help="잴 시간(초)")
+    ap.add_argument("--out", help="결과를 이 파일에도 쓴다 (UTF-8)")
+    a = ap.parse_args(argv)
+    if not a.once:
+        print("창 화면은 아직 없습니다(M4). --once 를 쓰세요.", file=sys.stderr)
+        return 2
+    print(f"{a.seconds}초 동안 재는 중…", file=sys.stderr)
+    result = once(a.seconds)
+    if a.out:
+        with open(a.out, "w", encoding="utf-8") as f:
+            f.write(result + "\n")
+    sys.stdout.reconfigure(encoding="utf-8")
+    print(result)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
