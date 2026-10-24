@@ -78,19 +78,38 @@ def evidence(v: Verdict) -> list[str]:
     return list(dict.fromkeys(out))
 
 
-def table(s: WindowStats) -> list[str]:
-    c, g, f, p = s.cpu, s.gpu, s.fans, s.power
-    ghz = lambda mhz: _n(None if mhz is None else mhz / 1000, "GHz", 1)  # noqa: E731
-    rows = [
-        f"{'':4}{'온도':>5}{'부하':>5}{'전력':>5}{'클럭':>7}",  # 한글은 두 칸 폭
-        f"{'CPU':4}{_n(c.temp, '°C'):>7}{_n(c.load, '%'):>7}{_n(c.power, 'W'):>7}{ghz(c.clock):>9}",
-        f"{'GPU':4}{_n(g.temp, '°C'):>7}{_n(g.load, '%'):>7}{_n(g.power, 'W'):>7}{ghz(g.clock):>9}",
-        f"팬   CPU {_n(f.cpu_rpm, 'rpm')} · GPU {_n(f.gpu_rpm, 'rpm')}",
-    ]
+HEADER = ("온도", "부하", "전력", "클럭")
+
+
+def device_cells(s: WindowStats) -> dict[str, tuple[str, str, str, str]]:
+    """화면·터미널 표의 CPU/GPU 줄. 값은 HEADER 순서."""
+    def ghz(mhz):
+        return _n(None if mhz is None else mhz / 1000, "GHz", 1)
+    return {
+        "CPU": (_n(s.cpu.temp, "°C"), _n(s.cpu.load, "%"), _n(s.cpu.power, "W"), ghz(s.cpu.clock)),
+        "GPU": (_n(s.gpu.temp, "°C"), _n(s.gpu.load, "%"), _n(s.gpu.power, "W"), ghz(s.gpu.clock)),
+    }
+
+
+def fan_line(s: WindowStats) -> str:
+    return f"CPU {_n(s.fans.cpu_rpm, 'rpm')} · GPU {_n(s.fans.gpu_rpm, 'rpm')}"
+
+
+def power_line(s: WindowStats) -> str:
+    p = s.power
     power = {True: "어댑터", False: "배터리", None: "전원 ?"}[p.ac]
     if p.charging:
         power += "(충전 중)"
-    rows.append(f"전원 {power} · {p.scheme or '전원 계획 ?'} · 성능 모드 {p.perf_mode or '확인 불가'}")
+    return f"{power} · {p.scheme or '전원 계획 ?'} · 성능 모드 {p.perf_mode or '확인 불가'}"
+
+
+def table(s: WindowStats) -> list[str]:
+    cells = device_cells(s)
+    rows = [f"{'':4}" + "".join(f"{h:>5}" for h in HEADER[:3]) + f"{HEADER[3]:>7}"]  # 한글은 두 칸 폭
+    for dev, (t, l, w, c) in cells.items():
+        rows.append(f"{dev:4}{t:>7}{l:>7}{w:>7}{c:>9}")
+    rows.append(f"팬   {fan_line(s)}")
+    rows.append(f"전원 {power_line(s)}")
     return rows
 
 

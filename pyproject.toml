@@ -14,6 +14,9 @@ dependencies = [
     "psutil>=5.9",        # 프로세스별 CPU 사용량
 ]
 
+[project.gui-scripts]
+thermo = "thermo.__main__:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
