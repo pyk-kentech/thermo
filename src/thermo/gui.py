@@ -166,6 +166,14 @@ class App:
         self.checkup_button.pack(side="right")
         self.tabs.add(refp, text="기준 측정")
         self.tabs.bind("<<NotebookTabChanged>>", lambda e: self.draw_graph())
+        self._wrapped = [self.level, self.situation, self.judgement, self.notes, self.evidence, self.ref_label]
+        r.bind("<Configure>", self._rewrap)
+
+    def _rewrap(self, event=None) -> None:
+        """창 폭이 바뀌면 줄바꿈 폭도 맞춘다(긴 프로그램 줄이 잘리지 않게)."""
+        w = max(self.root.winfo_width() - 60, 300)
+        for lab in self._wrapped:
+            lab.config(wraplength=w)
 
     # --- 갱신 ------------------------------------------------------------
     def show_measuring(self, n: int, size: int, notes: list[str]) -> None:

@@ -201,3 +201,12 @@ def test_monitor_reports_error():
     m.join(timeout=5)
     kind, msg = q.get(timeout=1)
     assert kind == "error" and "센서 없음" in msg
+
+
+def test_rewrap_follows_window_width(root):
+    app = gui.App(root, None)
+    root.deiconify()
+    root.geometry("800x700")
+    root.update()
+    app._rewrap()
+    assert int(str(app.situation.cget("wraplength"))) >= 700

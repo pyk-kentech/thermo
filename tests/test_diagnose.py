@@ -283,3 +283,17 @@ def test_last_comparison_carried_while_load_changes():
     assert "not_steady" in later.keys and "carried" in later.keys
     assert later.level == Level.WARN and "20초 전" in later.headline
     assert later.judgement[-1].startswith("20초 전 마지막 비교")
+
+
+def test_carried_evidence_has_age():
+    dg = Diagnoser(REF)
+    c, g = 20.0, 4.0
+    s = make(cpu={"temp": cpu_pred(c, g), "power": c}, gpu={"power": g, "temp": gpu_pred(g, c)}, fans={"cpu_rpm": 3400})
+    for t in range(130):
+        dg.add(float(t), c, g, s.gpu.temp, 3400.0)
+    dg.diagnose(s, 129.0)
+    for t in range(130, 134):
+        dg.add(float(t), c, 30.0, s.gpu.temp, 3400.0)
+    later = dg.diagnose(s, 133.0)
+    assert later.headline == "정상 — 비교 보류 (부하 변화 중)"
+    assert any(e.startswith("(4초 전 비교) CPU 기대") for e in later.evidence)

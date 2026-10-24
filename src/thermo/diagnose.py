@@ -188,7 +188,7 @@ def diagnose(stats: WindowStats, ref: Reference | None, steady: Steady,
         if throttling:
             keys.append("cpu_throttle")
             judge.append(f"CPU 가 95°C 에 닿아 10초 중 {c.thermal_frac:.0%} 동안 스스로 속도를 낮췄습니다.")
-        return _finish(level, headline or "비교 보류 — 부하 변화 중", stats, ref, judge, ev, notes, keys)
+        return _finish(level, headline or "비교 보류 (부하 변화 중)", stats, ref, judge, ev, notes, keys)
 
     hot_cooling = False      # 기대보다 뜨거움
     fan_slow = None          # 팬이 기준보다 느린 비율
@@ -369,6 +369,7 @@ class Diagnoser:
             age = now - self.last[0]
             prev = self.last[1]
             d.judgement.append(f"{age:.0f}초 전 마지막 비교: {prev.headline}")
+            d.evidence = d.evidence + [f"({age:.0f}초 전 비교) {e}" for e in prev.evidence]
             if age <= CARRY_SECONDS and prev.level > d.level:
                 d.level = prev.level
                 d.headline = f"{prev.headline} ({age:.0f}초 전 비교, 지금은 부하 변화 중)"
