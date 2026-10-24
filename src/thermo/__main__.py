@@ -117,12 +117,26 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--record", type=int, metavar="초", help="1초 표본을 기록한다(시험용)")
     ap.add_argument("--checkup", metavar="모드", help="기준 측정을 한다. 지금 Armoury Crate 성능 모드 이름을 준다")
     ap.add_argument("--room", type=float, help="기준 측정 때 방 온도(°C, 선택)")
+    ap.add_argument("--rebuild", metavar="번호들", help="저장된 기준 측정(예: 1,2)을 합쳐 다시 계산한다. --mode 와 함께")
+    ap.add_argument("--mode", help="--rebuild 때 성능 모드 이름")
     ap.add_argument("--out", help="결과를 이 파일에도 쓴다 (UTF-8)")
     ap.add_argument("--no-elevate", action="store_true", help="관리자 권한을 요청하지 않는다")
     ap.add_argument("--elevated", action="store_true", help=argparse.SUPPRESS)  # 재실행 표시
     a = ap.parse_args(argv)
     if a.checkup:
         return checkup(a.checkup, a.room)
+    if a.rebuild:
+        from .checkup import rebuild
+        from .reference import summary
+        from .store import Store
+        st = Store()
+        try:
+            ref = rebuild(st, [int(x) for x in a.rebuild.split(",")], a.mode or "?")
+        finally:
+            st.close()
+        sys.stdout.reconfigure(encoding="utf-8")
+        print("\n".join(summary(ref)))
+        return 0
     if a.record:
         result = record(a.record, a.out)
         if sys.stdout is not None and not a.out:

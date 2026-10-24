@@ -19,6 +19,10 @@ from .store import Store, steady_state
 HOLD_SECONDS = 60
 GAME_MIN_GPU_W = 25.0        # 게임이 켜졌다고 볼 GPU 전력
 GAME_WAIT_SECONDS = 120
+PRECHECK_SECONDS = 6
+BUSY_CPU = 3.0               # 사전 확인: 이 이상 CPU 를 쓰는 프로그램 (전체 대비 %)
+BUSY_GPU = 5.0               # 사전 확인: 이 이상 GPU 를 쓰는 프로그램
+IDLE_GPU_W = 8.0             # 공회전 때 dGPU 전력은 3W 안팎(M7 1차) — 이보다 크면 무언가 그래픽카드를 쓰는 중
 
 
 @dataclass
@@ -56,6 +60,23 @@ class Collector(Protocol):
 
 class Stopped(Exception):
     pass
+
+
+def busy_programs(snaps: list[Snapshot]) -> list[str]:
+    """여러 표본 평균으로 CPU·GPU 를 쓰는 프로그램 (이름 사용률)."""
+    if not snaps:
+        return []
+    cpu: dict[str, float] = {}
+    gpu: dict[str, float] = {}
+    for s in snaps:
+        for p in s.procs:
+            if p.name.lower() in ("python.exe", "pythonw.exe"):
+                continue
+            cpu[p.name] = cpu.get(p.name, 0) + p.cpu / len(snaps)
+            gpu[p.name] = gpu.get(p.name, 0) + p.gpu / len(snaps)
+    out = [f"{n} CPU {v:.0f}%" for n, v in sorted(cpu.items(), key=lambda x: -x[1]) if v >= BUSY_CPU]
+    out += [f"{n} GPU {v:.0f}%" for n, v in sorted(gpu.items(), key=lambda x: -x[1]) if v >= BUSY_GPU]
+    return out[:4]
 
 
 class Checkup:
@@ -143,14 +164,18 @@ class Checkup:
         cid = self.store.checkup_begin(self.mode, self.room)
         self.ui.say(f"기준 측정을 시작합니다 (성능 모드: {self.mode}). 약 20–25분 걸립니다. Ctrl+C 로 언제든 멈춥니다.")
         try:
-            s = self._tick()
-            if s.power.ac is False:
+            # 프로세스 사용률은 두 번째 표본부터 나온다(psutil). 2차 측정에서 첫 표본만 봐서 켜져 있던 게임을
+            # 놓쳤다 → 몇 초 재서 평균으로 본다.
+            snaps = [self._tick() for _ in range(PRECHECK_SECONDS)]
+            if snaps[-1].power.ac is False:
                 if not self.ui.ask("어댑터가 빠져 있습니다. 연결한 뒤 Enter (그만두려면 q)"):
                     raise Stopped("어댑터 없음")
-            busy = [p for p in s.procs if p.cpu >= 5]
-            if busy:
-                names = ", ".join(f"{p.name} {p.cpu:.0f}%" for p in busy[:3])
-                if not self.ui.ask(f"CPU 를 쓰는 프로그램이 있습니다({names}). 끄고 Enter, 그대로 하려면 Enter (그만두려면 q)"):
+            busy = busy_programs(snaps[1:])
+            gpu_w = [s.gpu.power for s in snaps[1:] if s.gpu.power is not None]
+            if busy or (gpu_w and min(gpu_w) > IDLE_GPU_W):
+                what = ", ".join(busy) or f"그래픽카드 {min(gpu_w):.0f}W 사용 중"
+                if not self.ui.ask(f"다른 프로그램이 돌고 있습니다({what}). 게임·무거운 프로그램을 끄고 Enter, "
+                                   "그대로 하려면 Enter (그만두려면 q)"):
                     raise Stopped("사용자가 그만뒀습니다")
             game_on = False
             for st in self.plan:
@@ -196,3 +221,35 @@ class ConsoleUI:
             return False
         self.say(f"  (입력: {ans or 'Enter'})")
         return ans != "q"
+
+
+def stage_holds(store: Store, cid: int, hold_seconds: int = HOLD_SECONDS) -> list[tuple[str, list[dict], bool]]:
+    """저장된 기준 측정 기록에 지금의 정상 상태 기준을 다시 적용해 단계마다 '유지' 구간을 다시 고른다."""
+    out = []
+    for s in store.checkup_stages(cid):
+        if s["stage"] == "cool":
+            continue
+        rows = store.rows(s["start"], s["end"] + 0.5)
+        pts = [(r["ts"], r["cpu_power"], r["gpu_power"], r["gpu_temp"]) for r in rows]
+        hold = next((i for i in range(len(rows)) if steady_state(pts[:i + 1], rows[i]["ts"]).steady), None)
+        if hold is not None and hold + hold_seconds <= len(rows):
+            out.append((s["stage"], rows[hold:hold + hold_seconds], True))
+        else:
+            out.append((s["stage"], rows[-hold_seconds:], False))
+    return out
+
+
+def rebuild(store: Store, ids: list[int], mode: str) -> reference.Reference:
+    """여러 기준 측정 기록을 합쳐 기준을 다시 만들고 새 기록으로 저장한다(원래 기록은 그대로 둔다).
+
+    모델은 전력과 온도의 짝으로 맞추므로, 무엇이 그 전력을 냈는지(측정 단계 이름)와 상관없이 같은 모드의
+    정상 상태 자료는 합칠 수 있다.
+    """
+    stages = []
+    for cid in ids:
+        stages += [(f"{name}#{cid}", rows, steady) for name, rows, steady in stage_holds(store, cid)]
+    ref = reference.build(mode, None, stages)
+    ref.notes.insert(0, f"기준 측정 {', '.join(f'#{i}' for i in ids)} 기록을 합쳐 다시 계산했습니다")
+    cid = store.checkup_begin(mode, None)
+    store.checkup_end(cid, "완료", ref.to_json())
+    return ref

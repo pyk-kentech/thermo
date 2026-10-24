@@ -208,7 +208,7 @@ def build(mode: str, room: float | None, stages: list[tuple[str, list[dict], boo
         "cpu": sorted((p.cpu_temp, p.fan_cpu) for p in steady_pts if p.cpu_temp is not None and p.fan_cpu is not None),
         "gpu": sorted((p.gpu_temp, p.fan_gpu) for p in steady_pts if p.gpu_temp is not None and p.fan_gpu is not None),
     }
-    by = {p.stage: p for p in points}
+    by = {p.stage.split("#")[0]: p for p in points}   # 합친 기록이면 마지막 측정 것이 남는다
     cpu_max = by.get("cpu16")
     gpu_st = by.get("gpu")
     idle = by.get("idle")
@@ -237,7 +237,8 @@ def expected_fan(curve: list[tuple[float, float]], temp: float) -> float | None:
     return None
 
 
-STAGE_NAMES = {"idle": "공회전", "cpu4": "CPU 4스레드", "cpu8": "CPU 8스레드", "cpu16": "CPU 16스레드",
+STAGE_NAMES = {"idle": "공회전", "cpu1": "CPU 1스레드", "cpu2": "CPU 2스레드", "cpu3": "CPU 3스레드",
+               "cpu4": "CPU 4스레드", "cpu8": "CPU 8스레드", "cpu16": "CPU 16스레드",
                "gpu": "게임(GPU)", "both": "게임 + CPU 16스레드", "cool": "식힘"}
 
 
@@ -247,7 +248,8 @@ def summary(ref: Reference) -> list[str]:
     out = [f"성능 모드: {ref.mode}" + (f", 방 온도 {ref.room:.0f}°C" if ref.room is not None else "")]
     out.append("단계별 (중앙값):")
     for p in ref.stages:
-        out.append(f"  {STAGE_NAMES.get(p.stage, p.stage):<14} CPU {f(p.cpu_power, 'W', 1)} {f(p.cpu_temp, '°C')}"
+        name, _, run = p.stage.partition("#")
+        out.append(f"  {STAGE_NAMES.get(name, name) + (f' #{run}' if run else ''):<16} CPU {f(p.cpu_power, 'W', 1)} {f(p.cpu_temp, '°C')}"
                    f" · GPU {f(p.gpu_power, 'W', 1)} {f(p.gpu_temp, '°C')} · 팬 {f(p.fan_cpu)}/{f(p.fan_gpu)}rpm"
                    f" · CPU 열 스로틀 {p.cpu_thermal:.0%}" + ("" if p.steady else " (정상 상태 아님)"))
     for m in (ref.cpu_model, ref.gpu_model):

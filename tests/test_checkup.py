@@ -171,7 +171,15 @@ def test_warns_busy_program_and_adapter(store):
     _, ui, _ = run_checkup(store, plan=plan, ac=False, busy_proc=("chrome.exe", 3, 20.0))
     text = "\n".join(ui.lines)
     assert "어댑터가 빠져" in text
-    assert "chrome.exe 20%" in text
+    assert "chrome.exe CPU 20%" in text
+
+
+def test_precheck_catches_running_game(store):
+    """2차 측정 버그: 첫 표본만 봐서 켜져 있던 게임을 놓쳤다. 여러 표본 평균으로 잡아야 한다."""
+    plan = [Stage("idle", "공회전", 0, False, 5)]
+    _, ui, _ = run_checkup(store, plan=plan, busy_proc=("League of Legends.exe", 9, 8.0, 22.0))
+    text = "\n".join(ui.lines)
+    assert "League of Legends.exe CPU 8%" in text and "GPU 22%" in text
 
 
 def test_fit_drops_narrow_input():
@@ -194,3 +202,18 @@ def test_reference_json_roundtrip(store):
     assert again.cpu_model.predict(cpu_power=20, gpu_power=4) == pytest.approx(
         ref.cpu_model.predict(cpu_power=20, gpu_power=4))
     assert R.summary(again)[0].startswith("성능 모드: Performance")
+
+
+def test_rebuild_combines_runs(store):
+    from thermo.checkup import rebuild
+    run_checkup(store)
+    run_checkup(store)
+    ids = [r[0] for r in store.db.execute("SELECT id FROM checkup ORDER BY id")]
+    ref = rebuild(store, ids, "Performance")
+    assert ref.cpu_model.coef["cpu_power"] == pytest.approx(CPU_B, abs=0.08)
+    assert ref.cpu_model.n > 10
+    assert any("#1" in p.stage for p in ref.stages) and any("#2" in p.stage for p in ref.stages)
+    assert "합쳐 다시 계산" in ref.notes[0]
+    latest = store.latest_checkup("Performance")
+    assert latest["id"] == max(ids) + 1
+    assert R.summary(R.Reference.from_json(latest["result"]))
