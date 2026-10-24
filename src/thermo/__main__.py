@@ -1,6 +1,7 @@
 """python -m thermo        : 창을 띄운다 (관리자 권한이 없으면 UAC 로 다시 띄움)
 python -m thermo --once : 10초 재고 판정을 터미널에 쓴다.
-python -m thermo --record 초 --out 파일 : 1초 표본을 thermo.db 에 기록하고 초마다 한 줄로 쓴다(시험용)."""
+python -m thermo --record 초 --out 파일 : 1초 표본을 thermo.db 에 기록하고 초마다 한 줄로 쓴다(시험용).
+python -m thermo --checkup 모드이름 [--room 24] : 기준 측정(건강검진)을 콘솔 창에서 진행한다(관리자)."""
 
 from __future__ import annotations
 
@@ -73,6 +74,32 @@ def record(seconds: int, out: str | None) -> str:
         col.close()
 
 
+def checkup(mode: str, room: float | None) -> int:
+    from .baseline import home
+    from .checkup import Checkup, ConsoleUI
+    from .store import Store
+    sys.stdout.reconfigure(encoding="utf-8")
+    ui = ConsoleUI(home() / "checkup.log")
+    col = Collector()
+    store = Store()
+    try:
+        for n in col.notes:
+            ui.say(f"※ {n}")
+        if col.fast is None or col.lhm is None:
+            ui.say("CPU 기록(MSR)이나 CPU 센서를 읽지 못해 기준 측정을 할 수 없습니다. 관리자 권한과 PawnIO 를 확인하세요.")
+            return 1
+        store.note("cpu_limits", vars(col.fast.limits))
+        ref = Checkup(col, store, mode, room, ui).run()
+        return 0 if ref else 1
+    finally:
+        store.close()
+        col.close()
+        try:
+            input("창을 닫으려면 Enter")
+        except EOFError:
+            pass
+
+
 def relaunch_as_admin() -> bool:
     """같은 파이썬(창 없는 pythonw)으로 관리자 권한 재실행을 요청한다. 사용자가 거절하면 False."""
     exe = Path(sys.executable)
@@ -88,10 +115,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--once", action="store_true", help="한 번 재고 터미널에 결과를 쓴다")
     ap.add_argument("--seconds", type=int, default=WINDOW, help="잴 시간(초)")
     ap.add_argument("--record", type=int, metavar="초", help="1초 표본을 기록한다(시험용)")
+    ap.add_argument("--checkup", metavar="모드", help="기준 측정을 한다. 지금 Armoury Crate 성능 모드 이름을 준다")
+    ap.add_argument("--room", type=float, help="기준 측정 때 방 온도(°C, 선택)")
     ap.add_argument("--out", help="결과를 이 파일에도 쓴다 (UTF-8)")
     ap.add_argument("--no-elevate", action="store_true", help="관리자 권한을 요청하지 않는다")
     ap.add_argument("--elevated", action="store_true", help=argparse.SUPPRESS)  # 재실행 표시
     a = ap.parse_args(argv)
+    if a.checkup:
+        return checkup(a.checkup, a.room)
     if a.record:
         result = record(a.record, a.out)
         if sys.stdout is not None and not a.out:

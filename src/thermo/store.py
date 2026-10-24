@@ -58,6 +58,12 @@ class Store:
             CREATE TABLE IF NOT EXISTS samples ({cols});
             CREATE INDEX IF NOT EXISTS samples_ts ON samples (ts);
             CREATE TABLE IF NOT EXISTS meta (ts REAL, key TEXT, value TEXT);
+            CREATE TABLE IF NOT EXISTS checkup (
+                id INTEGER PRIMARY KEY, started REAL, finished REAL, mode TEXT, room REAL,
+                status TEXT, result TEXT);
+            CREATE TABLE IF NOT EXISTS checkup_stage (
+                checkup_id INTEGER, stage TEXT, start REAL, hold_start REAL, end REAL,
+                steady INTEGER, note TEXT);
         """)
         self._pending = 0
         self.prune()
@@ -76,6 +82,39 @@ class Store:
         self.db.execute("INSERT INTO meta VALUES (?,?,?)", (time.time(), key, json.dumps(value, ensure_ascii=False)))
         self.db.commit()
 
+    # --- 기준 측정 (DESIGN 2판 7장) ---------------------------------------------
+    def checkup_begin(self, mode: str, room: float | None, now: float | None = None) -> int:
+        cur = self.db.execute("INSERT INTO checkup (started, mode, room, status) VALUES (?,?,?,?)",
+                              (now or time.time(), mode, room, "진행 중"))
+        self.db.commit()
+        return int(cur.lastrowid)
+
+    def checkup_stage(self, cid: int, stage: str, start: float, hold_start: float | None, end: float,
+                      steady: bool, note: str = "") -> None:
+        self.db.execute("INSERT INTO checkup_stage VALUES (?,?,?,?,?,?,?)",
+                        (cid, stage, start, hold_start, end, int(steady), note))
+        self.db.commit()
+
+    def checkup_end(self, cid: int, status: str, result: dict | None, now: float | None = None) -> None:
+        self.db.execute("UPDATE checkup SET finished=?, status=?, result=? WHERE id=?",
+                        (now or time.time(), status, None if result is None else json.dumps(result, ensure_ascii=False), cid))
+        self.db.commit()
+
+    def checkup_stages(self, cid: int) -> list[dict]:
+        cur = self.db.execute("SELECT * FROM checkup_stage WHERE checkup_id=? ORDER BY start", (cid,))
+        names = [d[0] for d in cur.description]
+        return [dict(zip(names, r)) for r in cur]
+
+    def latest_checkup(self, mode: str | None = None, status: str = "완료") -> dict | None:
+        q = "SELECT * FROM checkup WHERE status=?" + (" AND mode=?" if mode else "") + " ORDER BY started DESC LIMIT 1"
+        cur = self.db.execute(q, (status, mode) if mode else (status,))
+        r = cur.fetchone()
+        if r is None:
+            return None
+        d = dict(zip([x[0] for x in cur.description], r))
+        d["result"] = json.loads(d["result"]) if d["result"] else None
+        return d
+
     def rows(self, since: float, until: float | None = None) -> list[dict]:
         q = "SELECT * FROM samples WHERE ts >= ?" + (" AND ts < ?" if until else "") + " ORDER BY ts"
         cur = self.db.execute(q, (since, until) if until else (since,))
@@ -83,9 +122,13 @@ class Store:
         return [dict(zip(names, r)) for r in cur]
 
     def prune(self, now: float | None = None) -> None:
+        """30일 지난 표본을 지운다. 기준 측정 구간의 표본은 남긴다(다시 계산할 수 있게)."""
         cutoff = (now or time.time()) - KEEP_DAYS * 86400
         with self.db:
-            self.db.execute("DELETE FROM samples WHERE ts < ?", (cutoff,))
+            self.db.execute("""
+                DELETE FROM samples WHERE ts < ? AND NOT EXISTS (
+                    SELECT 1 FROM checkup c WHERE samples.ts BETWEEN c.started AND COALESCE(c.finished, c.started))""",
+                            (cutoff,))
 
     def close(self) -> None:
         self.db.commit()
