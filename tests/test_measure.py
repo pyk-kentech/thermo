@@ -43,15 +43,32 @@ def test_real_fast_state_decode():
     st = FakeMsr(REAL).fast()
     assert st.pkg_thermal is False and st.pkg_prochot is False
     assert st.tj_distance == 0x13
-    assert st.reasons == 0
+    assert st.reasons is None       # 0x64F 는 이 노트북에서 늘 0 이라 읽지 않는다(M6)
 
 
 def test_fast_state_bits():
-    regs = {**REAL, M.PACKAGE_THERM_STATUS: (5 << 16) | 1 | 4,
-            M.CORE_PERF_LIMIT_REASONS: (1 << 1) | (1 << 10) | (1 << 17)}   # 로그 비트는 무시
+    regs = {**REAL, M.PACKAGE_THERM_STATUS: (5 << 16) | 1 | 4}
     st = FakeMsr(regs).fast()
     assert st.pkg_thermal and st.pkg_prochot and st.tj_distance == 5
-    assert M.limit_names(st.reasons) == ["thermal", "pl1"]
+    assert M.limit_names((1 << 1) | (1 << 10)) == ["thermal", "pl1"]
+
+
+def test_core_temps_from_per_core_register():
+    m = FakeMsr(REAL)
+    # 코어마다 거리 다르게, 'reading valid'(bit31) 가 꺼진 코어 하나
+    vals = {cpu: (1 << 31) | ((20 + i) << 16) for i, cpu in enumerate(M.PHYSICAL_CORES)}
+    vals[15] = (30 << 16)
+    m.read_on = lambda idx, cpu: vals.get(cpu) if idx == M.THERM_STATUS else None
+    temps = m.core_temps(100)
+    assert len(temps) == 9 and temps[0] == 80 and min(temps) == 72
+
+
+def test_package_temp_is_median_of_the_second():
+    acc = LimitAccumulator(tjmax=100)
+    for dist in (30, 31, 5, 30, 29, 30, 31, 30, 30, 32):     # 한 번 튀어도 중앙값은 70
+        acc.add(M.FastState(False, False, dist, None))
+    s = acc.take(core_temps=[60.0, 62.0])
+    assert s.pkg_temp == 70 and s.peak_temp == 95 and s.core_temps == [60.0, 62.0]
 
 
 def test_package_power_from_energy_with_wraparound():

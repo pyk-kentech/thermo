@@ -43,16 +43,27 @@ def hot_diag():
 
 def test_measuring_then_diagnosis(root):
     app = gui.App(root, None)
-    assert "측정 중" in app.level.cget("text")
-    app.queue.put(("reference", reference(), "기준 측정 #7 (2026-10-24, Performance 모드)"))
+    assert app.level.cget("text") == "측정 중"
+    app.queue.put(("reference", reference(), "기준 측정 #7 (2026-10-24, Performance 모드)", None))
     app.queue.put(("verdict", hot_diag()))
     app.poll()
-    assert app.level.cget("text").startswith("● 이상")
-    assert app.level.cget("fg") == gui.COLORS[Level.BAD]
-    assert app.situation.cget("text").startswith("프로그램  blender.exe")
-    assert "CPU  95°C · 20W" in app.situation.cget("text")
-    assert app.judgement.cget("text").startswith("→ CPU 가 20W 에서 95°C")
+    assert app.level.cget("text") == "이상"
+    assert app.level.cget("fg") == gui.COLORS[Level.BAD] == app.bar.cget("bg")
+    assert app.headline.cget("text").startswith("CPU 가 평소보다 훨씬 낮은 전력에서 95°C")
+    assert app.cards["CPU"].big.cget("text") == "95°C"
+    assert app.cards["CPU"].badge.cget("text") == "95°C 스로틀 40%"
+    assert app.cards["FAN"].big.cget("text") == "3700"
+    assert app.judgement.cget("text").startswith("→  CPU 가 20W 에서 95°C")
     assert "스로틀" in app.evidence.cget("text")
+    assert app.ref_short.cget("text") == "기준 #7 · Performance"
+    names = [w.cget("text") for line in app.procs.winfo_children() for w in line.winfo_children()]
+    assert "blender.exe" in names
+
+
+def test_polyline_breaks_on_missing_values():
+    pts = [(0, 1.0), (1, 2.0), (2, None), (3, 4.0), (4, 5.0), (5, 6.0)]
+    runs = gui.polyline(pts, 1, lambda t: t, lambda v: v)
+    assert runs == [[0, 1.0, 1, 2.0], [3, 4.0, 4, 5.0, 5, 6.0]]
 
 
 def test_tabs_exist(root):
@@ -104,7 +115,7 @@ def test_graph_draws_history(root):
     root.update()
     assert len(app.history) == 120
     lines = [i for i in app.graph.find_all() if app.graph.type(i) == "line"]
-    assert len(lines) > 400        # 선 6개 × 119 조각 + 눈금
+    assert 6 <= len(lines) <= 30     # 선 6개를 한 번에(조각 3,600개가 아니라) + 눈금·범례
     texts = [app.graph.itemcget(i, "text") for i in app.graph.find_all() if app.graph.type(i) == "text"]
     assert "95°" in texts and "CPU 팬 rpm" in texts and "10분 전" in texts
 
@@ -124,17 +135,17 @@ def test_only_latest_verdict_shown(root):
     app.queue.put(("verdict", hot_diag()))
     app.queue.put(("verdict", diagnose(make(), None, Steady(True, ""))))
     app.poll()
-    assert app.level.cget("text").startswith("● 정상")
+    assert app.level.cget("text") == "정상"
     assert "기준 측정 전" in app.notes.cget("text")
 
 
 def test_error_and_notes(root):
     app = gui.App(root, None)
     app.show_measuring(3, 10, ["관리자 권한이 없어 CPU 코어 온도·팬 속도를 읽지 못합니다."])
-    assert "(3/10)" in app.situation.cget("text")
+    assert "(3/10)" in app.headline.cget("text")
     assert app.notes.cget("text").startswith("※ 관리자")
     app.show_error("RuntimeError: x")
-    assert app.level.cget("text") == "● 오류"
+    assert app.level.cget("text") == "오류"
 
 
 class FakeCollector:
@@ -209,4 +220,14 @@ def test_rewrap_follows_window_width(root):
     root.geometry("800x700")
     root.update()
     app._rewrap()
-    assert int(str(app.situation.cget("wraplength"))) >= 700
+    assert int(str(app.judgement.cget("wraplength"))) >= 700
+
+
+def test_same_name_processes_merged(root):
+    app = gui.App(root, None)
+    s = make(cpu={"temp": 60, "power": 10, "load": 10},
+             procs=[Proc("claude.exe", 1, cpu=2, gpu=3), Proc("claude.exe", 2, cpu=1), Proc("System", 4, cpu=1)])
+    app.show_verdict(diagnose(s, None, Steady(True, "")))
+    lines = [[w.cget("text") for w in line.winfo_children()] for line in app.procs.winfo_children()]
+    assert [l[0] for l in lines] == ["claude.exe", "System"]
+    assert lines[0][-1].startswith("CPU 3%")

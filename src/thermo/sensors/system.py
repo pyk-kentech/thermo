@@ -67,17 +67,28 @@ class Processes:
         return rows[:n]
 
 
-class PerfLimit:
-    """\\Processor Information(_Total)\\% Performance Limit."""
+class CpuPerf:
+    """성능 카운터: % Performance Limit(기록만, 판단에는 안 씀 — M6) 과 실효 클럭.
+
+    실효 클럭 = % Processor Performance × 기준 클럭(Win32_Processor.MaxClockSpeed, 이 CPU 는 2400MHz). 전체 코어 평균이라
+    LHM 의 '가장 빠른 코어' 보다 낮게 나온다. 화면 표시에만 쓴다.
+    """
 
     def __init__(self) -> None:
         dotnet.load()
         from System.Diagnostics import PerformanceCounter
-        self._pc = PerformanceCounter("Processor Information", "% Performance Limit", "_Total")
-        self._pc.NextValue()
+        from System.Management import ManagementObjectSearcher
+        self._limit = PerformanceCounter("Processor Information", "% Performance Limit", "_Total")
+        self._perf = PerformanceCounter("Processor Information", "% Processor Performance", "_Total")
+        self._limit.NextValue()
+        self._perf.NextValue()
+        self.base_mhz = 0.0
+        for o in ManagementObjectSearcher("SELECT MaxClockSpeed FROM Win32_Processor").Get():
+            self.base_mhz = float(o["MaxClockSpeed"])
 
-    def read(self) -> float:
-        return float(self._pc.NextValue())
+    def read(self) -> tuple[float, float | None]:
+        clock = self._perf.NextValue() / 100 * self.base_mhz if self.base_mhz else None
+        return float(self._limit.NextValue()), clock
 
 
 class Power:

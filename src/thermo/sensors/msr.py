@@ -11,6 +11,10 @@ from . import dotnet
 
 PLATFORM_INFO = 0xCE
 PACKAGE_THERM_STATUS = 0x1B1
+THERM_STATUS = 0x19C            # 코어별 (그 코어에서 읽어야 한다)
+# 물리 코어마다 논리 CPU 하나: P코어 6개(스레드 2개 중 첫째) + E코어 4개. tools/probe_64f.py 로 확인(M6):
+# 논리 0–11 은 두 개씩 같은 값·전류 한도 로그 비트가 있는 P코어, 12–15 는 E코어.
+PHYSICAL_CORES = (0, 2, 4, 6, 8, 10, 12, 13, 14, 15)
 TEMPERATURE_TARGET = 0x1A2
 RAPL_POWER_UNIT = 0x606
 PKG_POWER_LIMIT = 0x610
@@ -79,10 +83,28 @@ class Msr:
         self.power_unit = 1 / (1 << bits(unit, 3, 0))
         self.energy_unit = 1 / (1 << bits(unit, 12, 8))
         self._last_energy: tuple[int, float] | None = None
+        self._affinity = None
 
     def read(self, idx: int) -> int | None:
         ok, val = self._m.ReadMsr(self._u32(idx), self._u64(0))
         return int(val) if ok else None
+
+    def read_on(self, idx: int, cpu: int) -> int | None:
+        """논리 CPU 하나를 지정해 읽는다(코어별 레지스터용)."""
+        if self._affinity is None:
+            from LibreHardwareMonitor.Hardware import GroupAffinity
+            self._affinity = GroupAffinity
+        ok, lo, hi = self._m.ReadMsr(self._u32(idx), self._u32(0), self._u32(0), self._affinity.Single(0, cpu))
+        return (int(hi) << 32 | int(lo)) if ok else None
+
+    def core_temps(self, tjmax: int) -> list[float]:
+        """물리 코어별 온도 (TjMax - 0x19C 의 거리, 'reading valid' 비트가 켜진 것만)."""
+        out = []
+        for cpu in PHYSICAL_CORES:
+            v = self.read_on(THERM_STATUS, cpu)
+            if v is not None and v >> 31 & 1:
+                out.append(float(tjmax - bits(v, 22, 16)))
+        return out
 
     def limits(self) -> CpuLimits:
         tt = self.read(TEMPERATURE_TARGET) or 0
@@ -96,13 +118,13 @@ class Msr:
         )
 
     def fast(self) -> FastState:
+        # 0x64F(제한 이유)는 이 노트북에서 늘 0 이라(M6) 읽지 않는다
         pkg = self.read(PACKAGE_THERM_STATUS) or 0
-        lim = self.read(CORE_PERF_LIMIT_REASONS)
         return FastState(
             pkg_thermal=bool(pkg & PKG_THERMAL_STATUS),
             pkg_prochot=bool(pkg & PKG_PROCHOT),
             tj_distance=bits(pkg, 22, 16) if pkg else None,
-            reasons=None if lim is None else lim & 0xFFFF,
+            reasons=None,
         )
 
     def package_power(self, now: float) -> float | None:

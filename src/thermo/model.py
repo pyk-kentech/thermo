@@ -32,15 +32,15 @@ GPU_THERMAL_MASK = GPU_SW_THERMAL | GPU_HW_THERMAL
 
 @dataclass
 class CpuReading:
-    temp: float | None = None          # 패키지 온도 (LHM, 없으면 ASUS EC)
+    temp: float | None = None          # 패키지 온도 (MSR 0x1B1 1초 중앙값, 없으면 ASUS EC)
     temp_max: float | None = None      # 가장 뜨거운 코어
-    temp_avg: float | None = None      # 코어 평균 (LHM 'Core Average'). 냉각 비교용 — 한 코어에 몰린 부하에 덜 흔들린다
+    temp_avg: float | None = None      # 물리 코어 10개 평균 (MSR 0x19C). 냉각 비교용 — 한 코어에 몰린 부하에 덜 흔들린다
     tj_distance: float | None = None   # TjMax 까지 가장 작은 거리
     load: float | None = None          # 전체 사용률 %
     power: float | None = None         # 패키지 전력 W
     clock: float | None = None         # 가장 빠른 코어 MHz
     perf_limit: float | None = None    # % Performance Limit (100 = 제한 없음)
-    source: str = ""                   # "lhm" | "asus" | ""
+    source: str = ""                   # "msr" | "asus" | ""
     # MSR 10Hz 고리에서 (DESIGN 2판 5장). 1초(또는 창) 중 그 상태였던 비율 0–1
     peak_temp: float | None = None     # 그 사이 가장 높았던 패키지 온도 (TjMax - 최소 거리)
     thermal_frac: float | None = None  # 0x1B1 열 상태(95°C 도달) 비율

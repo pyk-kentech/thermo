@@ -94,7 +94,7 @@ def checkup(mode: str, room: float | None) -> int:
     try:
         for n in col.notes:
             ui.say(f"※ {n}")
-        if col.fast is None or col.lhm is None:
+        if col.fast is None:
             ui.say("CPU 기록(MSR)이나 CPU 센서를 읽지 못해 기준 측정을 할 수 없습니다. 관리자 권한과 PawnIO 를 확인하세요.")
             return 1
         store.note("cpu_limits", vars(col.fast.limits))

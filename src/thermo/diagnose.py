@@ -37,6 +37,8 @@ CONCENTRATION_GAP = 8
 # 모델 범위 밖으로 이만큼 넘으면 '범위 밖' 표시
 RANGE_MARGIN = 0.1
 
+PROGRAMS_PREFIX = "전력을 쓰는 프로그램: "
+
 # 창은 없지만 Windows 의 일부라 '백그라운드 작업'으로 부르면 오해를 부르는 것
 SYSTEM = {"dwm.exe", "system", "csrss.exe", "registry", "memory compression", "audiodg.exe", "fontdrvhost.exe"}
 
@@ -206,7 +208,8 @@ def diagnose(stats: WindowStats, ref: Reference | None, steady: Steady,
     # CPU: 스로틀 중이면 온도가 95°C 에 묶여 있으므로 '몇 W 에서 묶였나'로 비교한다
     if throttling and c.power is not None:
         onset = _throttle_onset(ref)
-        ev.append(f"CPU 95°C 스로틀 {c.thermal_frac:.0%} at {c.power:.0f}W (기준: {_f(onset, 0, 'W')} 부터 스로틀)")
+        ev.append(f"CPU 가 {c.power:.0f}W 에서 10초 중 {c.thermal_frac:.0%} 동안 95°C 스로틀 "
+                  f"(기준 측정에서는 {_f(onset, 0, 'W')} 부터 스로틀)")
         if onset and c.power < THROTTLE_POWER_BAD * onset:
             keys.append("cpu_throttle_low_power")
             hot_cooling = True
@@ -309,8 +312,9 @@ def diagnose(stats: WindowStats, ref: Reference | None, steady: Steady,
         who = ", ".join(f"{_name(p)}(CPU {p.cpu:.0f}%" + (f"·약 {w:.0f}W" if w and w >= 1 else "")
                         + (f", GPU {p.gpu:.0f}%" if p.gpu >= 1 else "") + ")" + (" — 창 없는 작업" if _bg(p) else "")
                         for p, w in big)
-        judge.append(f"전력을 쓰는 프로그램: {who}."
-                     + ("" if "cpu_design_limit" in keys else " 온도는 이 전력에서 이 노트북의 평소 범위입니다."))
+        judge.append(f"{PROGRAMS_PREFIX}{who}.")       # 창은 이 줄 대신 프로그램 카드를 보인다
+        if "cpu_design_limit" not in keys:
+            judge.append("온도는 이 전력에서 이 노트북의 평소 범위입니다.")
     # 히트파이프 공유
     if ref.cpu_model and "gpu_power" in ref.cpu_model.coef and g.power and c.power is not None:
         share = ref.cpu_model.coef["gpu_power"] * g.power
@@ -403,3 +407,12 @@ def load_reference(store, mode: str | None = None) -> tuple[Reference | None, st
     ref = Reference.from_json(d["result"])
     when = _t.strftime("%Y-%m-%d %H:%M", _t.localtime(d["started"]))
     return ref, f"기준 측정 #{d['id']} ({when}, {ref.mode} 모드)"
+
+
+# 화면(gui.py)이 쓰는 이름들
+is_background = _bg
+procs_with_watts = _proc_lines
+
+
+def known_name(p: Proc) -> str | None:
+    return KNOWN.get(p.name.lower())
