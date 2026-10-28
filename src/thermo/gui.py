@@ -13,6 +13,7 @@ import threading
 import time
 import tkinter as tk
 from collections import deque
+from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Callable
 
@@ -125,8 +126,11 @@ class Monitor(threading.Thread):
 
 def launch_checkup(mode: str) -> None:
     """기준 측정을 새 콘솔 창에서 시작한다(이 창은 이미 관리자 권한이라 그대로 물려받는다)."""
-    exe = sys.executable.replace("pythonw.exe", "python.exe")
-    subprocess.Popen([exe, "-m", "thermo", "--checkup", mode], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    if getattr(sys, "frozen", False):        # 설치한 앱: 콘솔용 thermo-cli.exe 가 같은 폴더에 있다
+        cmd = [str(Path(sys.executable).with_name("thermo-cli.exe")), "--checkup", mode]
+    else:
+        cmd = [sys.executable.replace("pythonw.exe", "python.exe"), "-m", "thermo", "--checkup", mode]
+    subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
 
 
 def polyline(points: list[tuple], idx: int, x, y) -> list[list[float]]:

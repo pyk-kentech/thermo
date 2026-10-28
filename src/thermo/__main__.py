@@ -112,14 +112,20 @@ def checkup(mode: str, room: float | None) -> int:
 def relaunch_as_admin() -> bool:
     """같은 파이썬(창 없는 pythonw)으로 관리자 권한 재실행을 요청한다. 사용자가 거절하면 False."""
     exe = Path(sys.executable)
-    pyw = exe.with_name("pythonw.exe")
-    if pyw.exists():
-        exe = pyw
-    rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", str(exe), "-m thermo --elevated", None, 1)
+    if getattr(sys, "frozen", False):        # 설치한 앱: thermo.exe 자신 (보통은 매니페스트로 이미 관리자)
+        args = "--elevated"
+    else:
+        pyw = exe.with_name("pythonw.exe")
+        if pyw.exists():
+            exe = pyw
+        args = "-m thermo --elevated"
+    rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", str(exe), args, None, 1)
     return rc > 32
 
 
 def main(argv: list[str] | None = None) -> int:
+    import multiprocessing
+    multiprocessing.freeze_support()     # 얼린 앱에서 기준 측정의 CPU 부하 프로세스가 같은 exe 로 뜬다
     ap = argparse.ArgumentParser(prog="thermo", description="FX707VU 온도 진단")
     ap.add_argument("--once", action="store_true", help="한 번 재고 터미널에 결과를 쓴다")
     ap.add_argument("--seconds", type=int, default=WINDOW, help="잴 시간(초)")

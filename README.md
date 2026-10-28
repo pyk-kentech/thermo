@@ -8,32 +8,40 @@ ASUS TUF Gaming F17 (FX707VU) 한 대 전용 온도 진단 도구.
 
 설계·측정 기록·판단 기준의 근거는 [DESIGN.md](DESIGN.md).
 
-## 준비 (한 번만)
+## 설치 (앱)
+
+1. [Releases](https://github.com/pyk-kentech/thermo/releases) 에서 `thermo-setup-<버전>.exe` 를 받아 실행한다
+   (또는 직접 만들기: 아래 '개발'). 서명이 없어 Windows SmartScreen 경고가 뜰 수 있다 — '추가 정보 → 실행'.
+2. 설치가 끝나면 PawnIO 가 없을 때 받는 곳을 열어 준다. **PawnIO** 는 CPU 온도·전력·95°C 스로틀 기록(MSR)을 읽는 데
+   쓰는 드라이버로, 사용자가 직접 설치한다: https://github.com/namazso/PawnIO.Setup/releases (없으면 판단은 하지 않고 숫자만 보인다).
+3. 시작 메뉴·바탕화면의 **thermo 온도 진단** 을 켠다(관리자 권한을 묻는다).
+4. **기준 측정(건강검진)** — 창의 '기준 측정' 탭에서 지금 성능 모드를 고르고 시작(약 25분, 중간에 게임을 켜고 끄는 안내가 나온다).
+   기준이 없으면 '평소보다 뜨거운가'는 판단하지 못한다.
+
+설치 폴더에는 `thermo.exe`(창)와 `thermo-cli.exe`(콘솔: `--once`, `--checkup` 등)가 있다.
+지울 때는 Windows '설치된 앱' 또는 시작 메뉴의 'thermo 제거'. 기록(`%LOCALAPPDATA%	hermo`)은 물어보고 지운다.
+글꼴은 [Pretendard](https://github.com/orioncactus/pretendard)(OFL-1.1)가 설치돼 있으면 쓰고, 없으면 맑은 고딕을 쓴다.
+
+## 소스에서 돌리기
 
 1. Python 3.11 이상.
 2. 설치
 
    ```
-   cd D:\thermo
+   cd D:	hermo
    python -m venv .venv
    .venv\Scripts\python -m pip install -e ".[dev]"
-   .venv\Scripts\python tools\fetch_lhm.py     # vendor\lhm 이 비어 있을 때만
+   .venv\Scripts\python toolsetch_lhm.py     # vendor\lhm 이 비어 있을 때만
    ```
 
-3. **PawnIO** 드라이버 (필수에 가깝다) — CPU 온도·전력·95°C 스로틀 기록(MSR)을 읽는 데 쓴다.
-   공식 설치 파일: https://github.com/namazso/PawnIO.Setup/releases (사용자가 직접 설치).
-   없으면 판단은 하지 않고 숫자만 보인다.
-4. 바탕화면 바로가기(선택): `.venv\Scripts\python tools\make_shortcut.py`
-5. 글꼴(선택): 화면은 [Pretendard](https://github.com/orioncactus/pretendard)(OFL-1.1)로 그린다. 설치돼 있지 않으면 맑은 고딕을 쓴다(함께 두지 않음).
-6. **기준 측정(건강검진)** — 창의 '기준 측정' 탭에서 지금 성능 모드를 고르고 시작(약 25분, 중간에 게임을 켜고 끄는 안내가 나온다).
-   기준이 없으면 '평소보다 뜨거운가'는 판단하지 못한다.
+3. PawnIO (위와 같음), 바탕화면 바로가기(선택): `.venv\Scripts\python tools\make_shortcut.py`
 
 ## 쓰기
 
 | 명령 | 하는 일 |
 |---|---|
 | 바로가기 `thermo 온도 진단` 또는 `.venv\Scripts\thermo.exe` | 창을 띄운다. 관리자 권한을 UAC 로 요청한다. |
-| `.venv\Scripts\python -m thermo --once --seconds 130` | 130초 재고 판단을 터미널에 쓴다(관리자 콘솔에서). |
+| `thermo-cli --once --seconds 130` (소스: `python -m thermo ...`) | 130초 재고 판단을 터미널에 쓴다. |
 | `... -m thermo --checkup Performance` | 기준 측정을 콘솔에서 한다. |
 | `... -m thermo --rebuild 1,2 --mode Performance` | 저장된 기준 측정을 합쳐 다시 계산한다. |
 | `... -m thermo --verify` | 검증 시나리오를 진행한다(DESIGN 10장). |
@@ -79,6 +87,8 @@ ASUS TUF Gaming F17 (FX707VU) 한 대 전용 온도 진단 도구.
 ## 개발
 
 ```
+.venv\Scripts\python -m pip install -e ".[dev,build]"
+.venv\Scripts\python toolsuild_app.py     # dist	hermo-setup-<버전>.exe (NSIS 의 makensis 필요)
 .venv\Scripts\python -m pytest -q
 .venv\Scripts\python tools\probe.py          # 센서별로 무엇이 읽히는지 (관리자로 실행하면 전부)
 ```

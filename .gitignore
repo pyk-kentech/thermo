@@ -4,3 +4,5 @@ __pycache__/
 vendor/nupkg/
 .pytest_cache/
 *.egg-info/
+build/
+dist/

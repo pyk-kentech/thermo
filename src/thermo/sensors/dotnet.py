@@ -6,7 +6,9 @@ import sys
 from functools import cache
 from pathlib import Path
 
-LHM_DIR = Path(__file__).resolve().parents[3] / "vendor" / "lhm"
+# 얼린 앱(PyInstaller)에서는 vendor\lhm 이 풀린 폴더(_MEIPASS) 아래에 있다
+LHM_DIR = (Path(getattr(sys, "_MEIPASS", "")) if getattr(sys, "frozen", False)
+           else Path(__file__).resolve().parents[3]) / "vendor" / "lhm"
 
 
 @cache

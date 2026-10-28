@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "thermo"
-version = "0.1.0"
+version = "1.0.0"
 description = "ASUS TUF FX707VU 전용 온도 진단 도구"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -20,6 +20,8 @@ thermo = "thermo.__main__:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# 설치 파일 만들 때만 (tools/build_app.py)
+build = ["pyinstaller>=6", "pillow>=10"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

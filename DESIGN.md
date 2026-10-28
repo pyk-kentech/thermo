@@ -298,6 +298,17 @@ tests\            합성 데이터 + 실제 기록 재생(replay) 테스트
 - 그래프는 선마다 `create_line` 한 번(값이 빈 곳에서만 끊음).
 - **화면: 어두운 카드형**(사용자 선택). 판정 띠(색 막대 + 판정 + 한 줄) → CPU·GPU·팬 카드(큰 숫자, 전력·사용률, 스로틀·제한 표시 띠, 2분 미니 그래프) → 판단 → 전력을 쓰는 프로그램(같은 이름은 합침, 창 없음 표시) → [근거 | 기록 | 기준 측정] 탭. Windows 어두운 제목 표시줄. 새 의존성 없음(tkinter).
 
+## 11.6 앱(설치 파일) (2026-10-28, 사용자 요청 "앱으로 만들어 줘", 형태: 설치 파일)
+
+- `tools/build_app.py`: 아이콘(`packaging/make_icon.py`, Pillow) → PyInstaller(`packaging/thermo.spec`, 폴더형 `dist	hermo`) → NSIS(`packaging/installer.nsi`) → `dist	hermo-setup-<버전>.exe`(1.0.0: 13.7MB).
+  - 실행 파일 두 개: `thermo.exe`(창, `console=False`)와 `thermo-cli.exe`(콘솔: `--once`·`--checkup`·`--verify`·`--rebuild`). 둘 다 매니페스트에 관리자 권한 요청(`uac_admin`). 창의 '기준 측정 시작'은 `thermo-cli.exe --checkup` 을 새 콘솔로 띄운다.
+  - 얼린 앱에서 바뀌는 곳: LHM DLL 경로(`_MEIPASSendor\lhm`), `multiprocessing.freeze_support()`(기준 측정의 CPU 부하 프로세스), 관리자 재실행 인자.
+  - NSIS 는 새로 설치하지 않고 tenure 빌드 때 electron-builder 가 받아 둔 `%LOCALAPPDATA%\electron-builder\Cache
+sis-3.0.4.1` 의 makensis 를 찾아 쓴다(또는 PATH, `THERMO_MAKENSIS`).
+  - 설치: `Program Files	hermo`, 시작 메뉴(앱·제거), 바탕화면 바로가기(선택), '설치된 앱' 등록. PawnIO 가 없으면 받는 곳을 열지 묻는다. 제거할 때 기록(`%LOCALAPPDATA%	hermo`)은 물어보고 지운다(기본: 남김).
+  - 빌드 전용 의존성(`[build]`): pyinstaller(GPL + 배포 예외), pillow(MIT-CMU). 실행 의존성은 그대로.
+- 확인(2026-10-28): `thermo-cli.exe --once` 가 파이썬 없이 실제 센서(MSR·NVML·ASUS·프로세스)로 판단을 냄, `thermo.exe` 창이 Pretendard·카드·프로그램 목록과 함께 뜸(캡처). 설치 파일을 실제로 설치·제거해 보지는 않았다. 얼린 앱에서 기준 측정의 CPU 부하(multiprocessing)는 돌려 보지 않았다.
+
 ## 12. 위험
 
 - PawnIO 는 사용자가 설치한 드라이버다. thermo 는 MSR 을 **읽기만** 한다(LHM 의 IntelMSR 모듈에는 쓰기 함수가 없다).
